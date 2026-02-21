@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Shield, Users, Stethoscope, Activity, Wallet, ShieldCheck, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { signOut } from '@/lib/supabase-helpers';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -80,7 +81,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="border-t border-sidebar-border p-3">
+        <div className="border-t border-sidebar-border p-3 space-y-1">
+          <div className="flex items-center justify-between px-3 py-1">
+            <span className="text-xs text-sidebar-foreground/50">Theme</span>
+            <ThemeToggle />
+          </div>
           <Button
             variant="ghost"
             className="w-full justify-start gap-3 text-sidebar-foreground/70 hover:text-sidebar-foreground"
@@ -114,6 +119,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 </Link>
               );
             })}
+            <ThemeToggle />
             <Button variant="ghost" size="icon" onClick={handleSignOut}>
               <LogOut className="h-4 w-4" />
             </Button>

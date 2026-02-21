@@ -4,6 +4,7 @@ import { SolanaTransactionFeed } from './financial/SolanaTransactionFeed';
 import { StripeACPStatus } from './financial/StripeACPStatus';
 import { RevenueChart } from './financial/RevenueChart';
 import { Wallet, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 
 export function FinancialDashboard() {
   const traceStats = {
@@ -17,46 +18,54 @@ export function FinancialDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Wallet className="w-6 h-6 text-green-400" />
+        <Wallet className="w-6 h-6 text-vital-green" />
         <div>
-          <h1 className="text-xl font-bold text-white">Financial Dashboard</h1>
-          <p className="text-sm text-gray-400">Agentic commerce, micropayments &amp; outcome-based billing</p>
+          <h1 className="text-xl font-bold text-foreground">Financial Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Agentic commerce, micropayments &amp; outcome-based billing</p>
         </div>
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <CheckCircle className="w-4 h-4 text-green-400" />
-            <span className="text-xs text-gray-400">Paid.ai Successful Traces</span>
-          </div>
-          <p className="text-2xl font-bold text-green-400 font-mono">{traceStats.success}</p>
-          <p className="text-xs text-gray-500 mt-1">Billed: €{traceStats.totalBilled.toFixed(2)}</p>
-        </div>
-        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <XCircle className="w-4 h-4 text-red-400" />
-            <span className="text-xs text-gray-400">Failed Traces (€0 billed)</span>
-          </div>
-          <p className="text-2xl font-bold text-red-400 font-mono">{traceStats.failure}</p>
-          <p className="text-xs text-gray-500 mt-1">Anomaly-aborted workflows</p>
-        </div>
-        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Clock className="w-4 h-4 text-yellow-400" />
-            <span className="text-xs text-gray-400">Pending Traces</span>
-          </div>
-          <p className="text-2xl font-bold text-yellow-400 font-mono">{traceStats.pending}</p>
-          <p className="text-xs text-gray-500 mt-1">Awaiting FHIR validation</p>
-        </div>
-        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Wallet className="w-4 h-4 text-aegis-400" />
-            <span className="text-xs text-gray-400">Multi-vendor Costs</span>
-          </div>
-          <p className="text-2xl font-bold text-aegis-400 font-mono">€{traceStats.totalCost.toFixed(2)}</p>
-          <p className="text-xs text-gray-500 mt-1">Crusoe + ElevenLabs + HAI-DEF + SOL</p>
-        </div>
+        <Card>
+          <CardContent className="p-4">
+            <div className="mb-1 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-vital-green" />
+              <span className="text-xs text-muted-foreground">Paid.ai Successful Traces</span>
+            </div>
+            <p className="text-2xl font-bold font-mono text-vital-green">{traceStats.success}</p>
+            <p className="mt-1 text-xs text-muted-foreground/60">Billed: €{traceStats.totalBilled.toFixed(2)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="mb-1 flex items-center gap-2">
+              <XCircle className="w-4 h-4 text-destructive" />
+              <span className="text-xs text-muted-foreground">Failed Traces (€0 billed)</span>
+            </div>
+            <p className="text-2xl font-bold font-mono text-destructive">{traceStats.failure}</p>
+            <p className="mt-1 text-xs text-muted-foreground/60">Anomaly-aborted workflows</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="mb-1 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-alert-amber" />
+              <span className="text-xs text-muted-foreground">Pending Traces</span>
+            </div>
+            <p className="text-2xl font-bold font-mono text-alert-amber">{traceStats.pending}</p>
+            <p className="mt-1 text-xs text-muted-foreground/60">Awaiting FHIR validation</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="mb-1 flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-primary" />
+              <span className="text-xs text-muted-foreground">Multi-vendor Costs</span>
+            </div>
+            <p className="text-2xl font-bold font-mono text-primary">€{traceStats.totalCost.toFixed(2)}</p>
+            <p className="mt-1 text-xs text-muted-foreground/60">Crusoe + ElevenLabs + HAI-DEF + SOL</p>
+          </CardContent>
+        </Card>
       </div>
 
       <RevenueChart data={mockRevenueData} timeRange="24h" />

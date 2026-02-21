@@ -1,28 +1,29 @@
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import MetricCard from "@/components/dashboard/MetricCard";
-import StatusBadge from "@/components/dashboard/StatusBadge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Activity, FileCheck, AlertTriangle } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { format } from "date-fns";
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { getMockObservationRows } from '@/lib/mock-fallback';
+import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import MetricCard from '@/components/dashboard/MetricCard';
+import StatusBadge from '@/components/dashboard/StatusBadge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Activity, FileCheck, AlertTriangle } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { format } from 'date-fns';
 
 export default function ObservationsPage() {
   const { data: observations, isLoading } = useQuery({
-    queryKey: ["fhir-observations"],
+    queryKey: ['fhir-observations'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("fhir_observations")
-        .select("*, fhir_patients(name_family, name_given)")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+        .from('fhir_observations')
+        .select('*, fhir_patients(name_family, name_given)')
+        .order('created_at', { ascending: false });
+      if (error || !data || data.length === 0) return getMockObservationRows();
       return data;
     },
   });
 
-  const finalCount = observations?.filter((o) => o.status === "final").length ?? 0;
-  const prelimCount = observations?.filter((o) => o.status === "preliminary").length ?? 0;
+  const finalCount = observations?.filter((o) => o.status === 'final').length ?? 0;
+  const prelimCount = observations?.filter((o) => o.status === 'preliminary').length ?? 0;
 
   return (
     <DashboardLayout>
@@ -62,7 +63,7 @@ export default function ObservationsPage() {
               {observations?.map((o) => (
                 <TableRow key={o.id}>
                   <TableCell className="font-medium">
-                    {(o as any).fhir_patients?.name_family ?? "Unknown"}
+                    {(o as any).fhir_patients?.name_family ?? 'Unknown'}
                   </TableCell>
                   <TableCell>
                     <div>
@@ -70,15 +71,15 @@ export default function ObservationsPage() {
                       <span className="block font-mono text-xs text-muted-foreground">{o.code_code}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="text-sm">{o.category_display ?? o.category_code ?? "—"}</TableCell>
+                  <TableCell className="text-sm">{o.category_display ?? o.category_code ?? '—'}</TableCell>
                   <TableCell className="font-mono text-sm">
                     {o.value_quantity_value != null
-                      ? `${o.value_quantity_value} ${o.value_quantity_unit ?? ""}`
-                      : o.value_string ?? "—"}
+                      ? `${o.value_quantity_value} ${o.value_quantity_unit ?? ''}`
+                      : o.value_string ?? '—'}
                   </TableCell>
                   <TableCell><StatusBadge status={o.status} /></TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
-                    {o.effective_datetime ? format(new Date(o.effective_datetime), "MMM d, yyyy HH:mm") : "—"}
+                    {o.effective_datetime ? format(new Date(o.effective_datetime), 'MMM d, yyyy HH:mm') : '—'}
                   </TableCell>
                 </TableRow>
               ))}

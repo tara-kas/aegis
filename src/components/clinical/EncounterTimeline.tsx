@@ -24,13 +24,13 @@ export function EncounterTimeline({ encounters, procedures }: EncounterTimelineP
   const sorted = [...encounters].sort((a, b) => new Date(b.period.start).getTime() - new Date(a.period.start).getTime());
 
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-      <div className="p-3 border-b border-gray-700 bg-gray-800/50">
-        <h3 className="text-sm font-medium text-gray-300">Encounter Timeline</h3>
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="border-b border-border bg-muted/50 p-3">
+        <h3 className="text-sm font-medium text-foreground/80">Encounter Timeline</h3>
       </div>
       <div className="p-4">
         <div className="relative">
-          <div className="absolute left-3 top-0 bottom-0 w-px bg-gray-700" />
+          <div className="absolute bottom-0 left-3 top-0 w-px bg-border" />
           <div className="space-y-4">
             {sorted.map((enc) => {
               const Icon = STATUS_ICON[enc.status] ?? Clock;
@@ -39,25 +39,25 @@ export function EncounterTimeline({ encounters, procedures }: EncounterTimelineP
 
               return (
                 <div key={enc.id} className="relative pl-8">
-                  <div className={`absolute left-1.5 top-1 w-3 h-3 rounded-full border-2 ${isActive ? 'bg-green-400 border-green-400 animate-pulse' : 'bg-gray-700 border-gray-600'}`} />
-                  <div className={`rounded-lg p-3 ${isActive ? 'bg-gray-800 border border-aegis-700' : 'bg-gray-800/50'}`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-green-400' : 'text-gray-500'}`} />
-                      <span className="text-sm font-medium text-white">{enc.type?.[0]?.text ?? 'Encounter'}</span>
+                  <div className={`absolute left-1.5 top-1 h-3 w-3 rounded-full border-2 ${isActive ? 'animate-pulse border-vital-green bg-vital-green' : 'border-border bg-muted'}`} />
+                  <div className={`rounded-lg p-3 ${isActive ? 'border border-primary bg-muted' : 'bg-muted/50'}`}>
+                    <div className="mb-1 flex items-center gap-2">
+                      <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-vital-green' : 'text-muted-foreground'}`} />
+                      <span className="text-sm font-medium text-foreground">{enc.type?.[0]?.text ?? 'Encounter'}</span>
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-gray-400">
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span>{formatDate(enc.period.start)} {formatTime(enc.period.start)}</span>
                       {enc.period.end && <span>→ {formatTime(enc.period.end)}</span>}
-                      <span className="text-gray-600">|</span>
+                      <span className="text-muted-foreground/50">|</span>
                       <span>{enc.subject.display}</span>
                     </div>
                     {proc && (
-                      <div className="mt-2 text-xs text-aegis-300">
+                      <div className="mt-2 text-xs text-primary/80">
                         Procedure: {proc.code.text ?? proc.code.coding[0]?.display}
                       </div>
                     )}
                     {enc.reasonCode?.[0] && (
-                      <div className="mt-1 text-xs text-gray-500">
+                      <div className="mt-1 text-xs text-muted-foreground">
                         {enc.reasonCode[0].text}
                       </div>
                     )}

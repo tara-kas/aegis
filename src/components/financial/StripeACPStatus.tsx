@@ -11,67 +11,67 @@ function formatCents(cents: number, currency: string): string {
 }
 
 const SPT_STATUS_COLORS: Record<string, string> = {
-  captured: 'text-green-400',
-  authorized: 'text-yellow-400',
-  created: 'text-blue-400',
-  expired: 'text-gray-500',
-  cancelled: 'text-red-400',
+  captured: 'text-vital-green',
+  authorized: 'text-alert-amber',
+  created: 'text-clinical-blue',
+  expired: 'text-muted-foreground',
+  cancelled: 'text-destructive',
 };
 
 export function StripeACPStatus({ status, subscriptions }: StripeACPStatusProps) {
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-      <div className="p-3 border-b border-gray-700 bg-gray-800/50 flex items-center justify-between">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border bg-muted/50 p-3">
         <div className="flex items-center gap-2">
-          <CreditCard className="w-4 h-4 text-indigo-400" />
-          <h3 className="text-sm font-medium text-gray-300">Stripe Agentic Commerce</h3>
+          <CreditCard className="w-4 h-4 text-purple-500 dark:text-purple-400" />
+          <h3 className="text-sm font-medium text-foreground/80">Stripe Agentic Commerce</h3>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded ${
-          status.status === 'active' ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'
+        <span className={`rounded px-2 py-0.5 text-xs ${
+          status.status === 'active' ? 'bg-vital-green/10 text-vital-green' : 'bg-alert-amber/10 text-alert-amber'
         }`}>
           ACP {status.status}
         </span>
       </div>
 
       <div className="p-4">
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="bg-gray-800 rounded-lg p-3">
-            <span className="text-xs text-gray-500">Total Processed</span>
-            <p className="text-lg font-bold text-white font-mono">{formatCents(status.totalProcessed, status.currency)}</p>
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <div className="rounded-lg bg-muted p-3">
+            <span className="text-xs text-muted-foreground">Total Processed</span>
+            <p className="text-lg font-bold font-mono text-foreground">{formatCents(status.totalProcessed, status.currency)}</p>
           </div>
-          <div className="bg-gray-800 rounded-lg p-3">
-            <span className="text-xs text-gray-500">Agent ID</span>
-            <p className="text-xs font-mono text-aegis-400 mt-1">{status.agentId}</p>
+          <div className="rounded-lg bg-muted p-3">
+            <span className="text-xs text-muted-foreground">Agent ID</span>
+            <p className="mt-1 text-xs font-mono text-primary">{status.agentId}</p>
           </div>
         </div>
 
-        <h4 className="text-xs font-medium text-gray-400 mb-2">Shared Payment Tokens</h4>
-        <div className="space-y-2 mb-4">
+        <h4 className="mb-2 text-xs font-medium text-muted-foreground">Shared Payment Tokens</h4>
+        <div className="mb-4 space-y-2">
           {status.sharedPaymentTokens.map((spt) => (
-            <div key={spt.id} className="bg-gray-800 rounded p-2 flex items-center justify-between">
+            <div key={spt.id} className="flex items-center justify-between rounded bg-muted p-2">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-gray-300">{spt.id}</span>
-                  <span className={`text-xs ${SPT_STATUS_COLORS[spt.status] ?? 'text-gray-400'}`}>{spt.status}</span>
+                  <span className="text-xs font-mono text-foreground/80">{spt.id}</span>
+                  <span className={`text-xs ${SPT_STATUS_COLORS[spt.status] ?? 'text-muted-foreground'}`}>{spt.status}</span>
                 </div>
-                <span className="text-xs text-gray-500">{spt.scope}</span>
+                <span className="text-xs text-muted-foreground">{spt.scope}</span>
               </div>
-              <span className="text-sm font-mono text-white">{formatCents(spt.amountCents, spt.currency)}</span>
+              <span className="text-sm font-mono text-foreground">{formatCents(spt.amountCents, spt.currency)}</span>
             </div>
           ))}
         </div>
 
-        <h4 className="text-xs font-medium text-gray-400 mb-2">Subscriptions</h4>
+        <h4 className="mb-2 text-xs font-medium text-muted-foreground">Subscriptions</h4>
         <div className="space-y-2">
           {subscriptions.map((sub) => (
             <div key={sub.id} className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
-                {sub.status === 'active' ? <CheckCircle className="w-3 h-3 text-green-400" /> :
-                 sub.status === 'past_due' ? <AlertCircle className="w-3 h-3 text-red-400" /> :
-                 <Clock className="w-3 h-3 text-gray-400" />}
-                <span className="text-gray-300">{sub.plan}</span>
+                {sub.status === 'active' ? <CheckCircle className="w-3 h-3 text-vital-green" /> :
+                 sub.status === 'past_due' ? <AlertCircle className="w-3 h-3 text-destructive" /> :
+                 <Clock className="w-3 h-3 text-muted-foreground" />}
+                <span className="text-foreground/80">{sub.plan}</span>
               </div>
-              <span className="font-mono text-white">{formatCents(sub.amountCents, sub.currency)}</span>
+              <span className="font-mono text-foreground">{formatCents(sub.amountCents, sub.currency)}</span>
             </div>
           ))}
         </div>

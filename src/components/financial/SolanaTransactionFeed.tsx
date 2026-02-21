@@ -16,40 +16,40 @@ function formatSol(sol: number): string {
 
 export function SolanaTransactionFeed({ transactions, walletAddress }: SolanaTransactionFeedProps) {
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-      <div className="p-3 border-b border-gray-700 bg-gray-800/50 flex items-center justify-between">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border bg-muted/50 p-3">
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full bg-gradient-to-r from-purple-500 to-green-400" />
-          <h3 className="text-sm font-medium text-gray-300">Solana Token-2022 Tx Feed</h3>
+          <div className="h-4 w-4 rounded-full bg-gradient-to-r from-purple-500 to-green-400" />
+          <h3 className="text-sm font-medium text-foreground/80">Solana Token-2022 Tx Feed</h3>
         </div>
-        <span className="text-xs text-gray-500 font-mono">{walletAddress}</span>
+        <span className="text-xs font-mono text-muted-foreground">{walletAddress}</span>
       </div>
 
-      <div className="divide-y divide-gray-800">
+      <div className="divide-y divide-border">
         {transactions.map((tx) => (
-          <div key={tx.signature} className="p-3 hover:bg-gray-800/50 transition-colors">
-            <div className="flex items-center justify-between mb-1">
+          <div key={tx.signature} className="p-3 transition-colors hover:bg-muted/50">
+            <div className="mb-1 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Link className="w-3.5 h-3.5 text-gray-500" />
-                <span className="text-xs font-mono text-aegis-400">{truncateSig(tx.signature)}</span>
+                <Link className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-xs font-mono text-primary">{truncateSig(tx.signature)}</span>
                 {tx.isConfidential && (
-                  <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-purple-900 text-purple-300">
+                  <span className="flex items-center gap-1 rounded bg-purple-500/10 px-1.5 py-0.5 text-xs text-purple-500 dark:text-purple-400">
                     <ShieldCheck className="w-3 h-3" />
                     Confidential
                   </span>
                 )}
               </div>
-              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                tx.status === 'finalized' ? 'bg-green-900 text-green-300' : tx.status === 'confirmed' ? 'bg-yellow-900 text-yellow-300' : 'bg-red-900 text-red-300'
+              <span className={`rounded px-1.5 py-0.5 text-xs ${
+                tx.status === 'finalized' ? 'bg-vital-green/10 text-vital-green' : tx.status === 'confirmed' ? 'bg-alert-amber/10 text-alert-amber' : 'bg-destructive/10 text-destructive'
               }`}>
                 {tx.status}
               </span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-400">{tx.memo ?? 'No memo'}</span>
-              <span className="text-white font-mono">{formatSol(tx.amountSol)}</span>
+              <span className="text-muted-foreground">{tx.memo ?? 'No memo'}</span>
+              <span className="font-mono text-foreground">{formatSol(tx.amountSol)}</span>
             </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-gray-600">
+            <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground/60">
               <span>Slot: {tx.slot.toLocaleString()}</span>
               <span>Fee: {tx.fee} lamports</span>
               {tx.isConfidential && (

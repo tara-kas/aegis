@@ -8,9 +8,9 @@ interface AnomalyAlertBannerProps {
 }
 
 const SEVERITY_CONFIG = {
-  critical: { icon: AlertTriangle, bg: 'bg-red-950 border-red-700', text: 'text-red-400', badge: 'bg-red-700' },
-  warning: { icon: AlertCircle, bg: 'bg-amber-950 border-amber-700', text: 'text-amber-400', badge: 'bg-amber-700' },
-  info: { icon: Info, bg: 'bg-blue-950 border-blue-700', text: 'text-blue-400', badge: 'bg-blue-700' },
+  critical: { icon: AlertTriangle, bg: 'bg-destructive/10 border-destructive/40', text: 'text-destructive', badge: 'bg-destructive' },
+  warning: { icon: AlertCircle, bg: 'bg-alert-amber/10 border-alert-amber/40', text: 'text-alert-amber', badge: 'bg-alert-amber' },
+  info: { icon: Info, bg: 'bg-clinical-blue/10 border-clinical-blue/40', text: 'text-clinical-blue', badge: 'bg-clinical-blue' },
 };
 
 function formatTimestamp(ts: string): string {
@@ -31,7 +31,7 @@ export function AnomalyAlertBanner({ alerts, onDismiss, onAcknowledge }: Anomaly
         return (
           <div
             key={alert.id}
-            className={`${config.bg} border rounded-lg p-3 flex items-start gap-3 animate-pulse-once`}
+            className={`${config.bg} border rounded-lg p-3 flex items-start gap-3`}
           >
             <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${config.text}`} />
             <div className="flex-1 min-w-0">
@@ -40,31 +40,31 @@ export function AnomalyAlertBanner({ alerts, onDismiss, onAcknowledge }: Anomaly
                   {alert.severity}
                 </span>
                 <span className={`font-medium text-sm ${config.text}`}>{alert.title}</span>
-                <span className="text-xs text-gray-500 ml-auto flex-shrink-0">{formatTimestamp(alert.timestamp)}</span>
+                <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">{formatTimestamp(alert.timestamp)}</span>
               </div>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">{alert.message}</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{alert.message}</p>
             </div>
             <div className="flex gap-1 flex-shrink-0">
               <button
                 onClick={() => onAcknowledge(alert.id)}
-                className="p-1 rounded hover:bg-white/10 transition-colors"
+                className="p-1 rounded hover:bg-foreground/10 transition-colors"
                 title="Acknowledge"
               >
-                <CheckCircle className="w-4 h-4 text-gray-400 hover:text-green-400" />
+                <CheckCircle className="w-4 h-4 text-muted-foreground hover:text-vital-green" />
               </button>
               <button
                 onClick={() => onDismiss(alert.id)}
-                className="p-1 rounded hover:bg-white/10 transition-colors"
+                className="p-1 rounded hover:bg-foreground/10 transition-colors"
                 title="Dismiss"
               >
-                <X className="w-4 h-4 text-gray-400 hover:text-white" />
+                <X className="w-4 h-4 text-muted-foreground hover:text-foreground" />
               </button>
             </div>
           </div>
         );
       })}
       {active.length > 5 && (
-        <p className="text-xs text-gray-500 text-center">+ {active.length - 5} more alerts</p>
+        <p className="text-xs text-muted-foreground text-center">+ {active.length - 5} more alerts</p>
       )}
     </div>
   );

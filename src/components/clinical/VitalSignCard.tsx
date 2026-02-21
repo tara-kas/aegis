@@ -17,9 +17,9 @@ const VITAL_ICONS: Record<string, typeof Heart> = {
 };
 
 function getSeverityColor(value: number, range: { low: number; high: number }): string {
-  if (value < range.low * 0.9 || value > range.high * 1.1) return 'text-clinical-critical';
-  if (value < range.low || value > range.high) return 'text-clinical-warning';
-  return 'text-clinical-safe';
+  if (value < range.low * 0.9 || value > range.high * 1.1) return 'text-destructive';
+  if (value < range.low || value > range.high) return 'text-alert-amber';
+  return 'text-vital-green';
 }
 
 function getTrendArrow(trend: VitalSign['trend']): string {
@@ -35,9 +35,9 @@ export function VitalSignCard({ vital }: VitalSignCardProps) {
   const color = getSeverityColor(vital.value, vital.normalRange);
 
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 hover:border-aegis-500 transition-colors">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 text-gray-400 text-sm">
+    <div className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Icon className="w-4 h-4" />
           <span>{vital.display}</span>
         </div>
@@ -48,9 +48,9 @@ export function VitalSignCard({ vital }: VitalSignCardProps) {
       <div className={`text-3xl font-bold font-mono ${color}`}>
         {vital.value.toFixed(vital.unit === '°C' ? 1 : 0)}
       </div>
-      <div className="flex items-center justify-between mt-1">
-        <span className="text-xs text-gray-500">{vital.unit}</span>
-        <span className="text-xs text-gray-600">
+      <div className="mt-1 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{vital.unit}</span>
+        <span className="text-xs text-muted-foreground/60">
           {vital.normalRange.low}–{vital.normalRange.high}
         </span>
       </div>

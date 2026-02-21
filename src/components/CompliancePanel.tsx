@@ -42,10 +42,10 @@ export function CompliancePanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <ShieldCheck className="w-6 h-6 text-indigo-400" />
+        <ShieldCheck className="w-6 h-6 text-purple-500 dark:text-purple-400" />
         <div>
-          <h1 className="text-xl font-bold text-white">Compliance &amp; Governance</h1>
-          <p className="text-sm text-gray-400">EU AI Act, DORA, MDR — regulatory compliance &amp; incident management</p>
+          <h1 className="text-xl font-bold text-foreground">Compliance &amp; Governance</h1>
+          <p className="text-sm text-muted-foreground">EU AI Act, DORA, MDR — regulatory compliance &amp; incident management</p>
         </div>
       </div>
 

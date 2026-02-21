@@ -8,10 +8,10 @@ interface TelemetryPanelProps {
 }
 
 const STATUS_CONFIG: Record<ConnectionStatus, { icon: typeof Wifi; label: string; color: string }> = {
-  connected: { icon: Wifi, label: 'Live', color: 'text-green-400' },
-  connecting: { icon: Radio, label: 'Connecting...', color: 'text-yellow-400' },
-  disconnected: { icon: WifiOff, label: 'Offline', color: 'text-gray-500' },
-  error: { icon: AlertTriangle, label: 'Error', color: 'text-red-400' },
+  connected: { icon: Wifi, label: 'Live', color: 'text-vital-green' },
+  connecting: { icon: Radio, label: 'Connecting...', color: 'text-alert-amber' },
+  disconnected: { icon: WifiOff, label: 'Offline', color: 'text-muted-foreground' },
+  error: { icon: AlertTriangle, label: 'Error', color: 'text-destructive' },
 };
 
 export function TelemetryPanel({ deviceId, latestFrame, connectionStatus }: TelemetryPanelProps) {
@@ -19,75 +19,75 @@ export function TelemetryPanel({ deviceId, latestFrame, connectionStatus }: Tele
   const StatusIcon = statusCfg.icon;
 
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-      <div className="p-3 border-b border-gray-700 bg-gray-800/50 flex items-center justify-between">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border bg-muted/50 p-3">
         <div className="flex items-center gap-2">
-          <Radio className="w-4 h-4 text-aegis-400" />
-          <h3 className="text-sm font-medium text-gray-300">Robotic Telemetry</h3>
-          <span className="text-xs text-gray-500 font-mono">{deviceId}</span>
+          <Radio className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-medium text-foreground/80">Robotic Telemetry</h3>
+          <span className="text-xs font-mono text-muted-foreground">{deviceId}</span>
         </div>
         <div className={`flex items-center gap-1.5 text-xs ${statusCfg.color}`}>
           <StatusIcon className="w-3.5 h-3.5" />
           <span>{statusCfg.label}</span>
           {connectionStatus === 'connected' && (
-            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="h-2 w-2 rounded-full bg-vital-green animate-pulse" />
           )}
         </div>
       </div>
 
       {latestFrame ? (
         <div className="p-4">
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-gray-800 rounded p-2">
-              <span className="text-xs text-gray-500">Frame</span>
-              <p className="text-lg font-mono text-white">#{latestFrame.frameId}</p>
+          <div className="mb-4 grid grid-cols-2 gap-3">
+            <div className="rounded bg-muted p-2">
+              <span className="text-xs text-muted-foreground">Frame</span>
+              <p className="text-lg font-mono text-foreground">#{latestFrame.frameId}</p>
             </div>
-            <div className="bg-gray-800 rounded p-2">
-              <span className="text-xs text-gray-500">Anomaly Score</span>
-              <p className={`text-lg font-mono ${latestFrame.anomalyScore > 0.7 ? 'text-red-400' : latestFrame.anomalyScore > 0.3 ? 'text-yellow-400' : 'text-green-400'}`}>
+            <div className="rounded bg-muted p-2">
+              <span className="text-xs text-muted-foreground">Anomaly Score</span>
+              <p className={`text-lg font-mono ${latestFrame.anomalyScore > 0.7 ? 'text-destructive' : latestFrame.anomalyScore > 0.3 ? 'text-alert-amber' : 'text-vital-green'}`}>
                 {latestFrame.anomalyScore.toFixed(3)}
               </p>
             </div>
           </div>
 
           <div className="mb-4">
-            <h4 className="text-xs font-medium text-gray-400 mb-2">End Effector Position</h4>
+            <h4 className="mb-2 text-xs font-medium text-muted-foreground">End Effector Position</h4>
             <div className="grid grid-cols-3 gap-2">
               {(['x', 'y', 'z'] as const).map((axis) => (
-                <div key={axis} className="bg-gray-800 rounded p-2 text-center">
-                  <span className="text-xs text-gray-500 uppercase">{axis}</span>
-                  <p className="text-sm font-mono text-white">{latestFrame.endEffector.position[axis].toFixed(1)}</p>
+                <div key={axis} className="rounded bg-muted p-2 text-center">
+                  <span className="text-xs uppercase text-muted-foreground">{axis}</span>
+                  <p className="text-sm font-mono text-foreground">{latestFrame.endEffector.position[axis].toFixed(1)}</p>
                 </div>
               ))}
             </div>
           </div>
 
           <div>
-            <h4 className="text-xs font-medium text-gray-400 mb-2">Joint Angles (6-axis)</h4>
+            <h4 className="mb-2 text-xs font-medium text-muted-foreground">Joint Angles (6-axis)</h4>
             <div className="space-y-1.5">
               {latestFrame.joints.map((joint) => (
                 <div key={joint.jointId} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 w-28 truncate">{joint.name}</span>
-                  <div className="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+                  <span className="w-28 truncate text-xs text-muted-foreground">{joint.name}</span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full bg-aegis-500 rounded-full transition-all duration-100"
+                      className="h-full rounded-full bg-primary transition-all duration-100"
                       style={{ width: `${Math.min(100, Math.abs(joint.angleDeg) / 1.8)}%` }}
                     />
                   </div>
-                  <span className="text-xs font-mono text-gray-300 w-16 text-right">{joint.angleDeg.toFixed(1)}°</span>
+                  <span className="w-16 text-right text-xs font-mono text-foreground/80">{joint.angleDeg.toFixed(1)}°</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
+          <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground/60">
             <span>Force: {latestFrame.endEffector.forceN.toFixed(2)} N</span>
             <span>Gripper: {latestFrame.endEffector.gripperApertureMm.toFixed(1)} mm</span>
           </div>
         </div>
       ) : (
-        <div className="p-8 text-center text-gray-600">
-          <Radio className="w-8 h-8 mx-auto mb-2 opacity-30" />
+        <div className="p-8 text-center text-muted-foreground">
+          <Radio className="mx-auto mb-2 h-8 w-8 opacity-30" />
           <p className="text-sm">Waiting for telemetry data...</p>
         </div>
       )}

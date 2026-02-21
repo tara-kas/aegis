@@ -1,28 +1,29 @@
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import MetricCard from "@/components/dashboard/MetricCard";
-import StatusBadge from "@/components/dashboard/StatusBadge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Stethoscope, Clock, CheckCircle } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { format } from "date-fns";
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { getMockEncounterRows } from '@/lib/mock-fallback';
+import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import MetricCard from '@/components/dashboard/MetricCard';
+import StatusBadge from '@/components/dashboard/StatusBadge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Stethoscope, Clock, CheckCircle } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { format } from 'date-fns';
 
 export default function EncountersPage() {
   const { data: encounters, isLoading } = useQuery({
-    queryKey: ["fhir-encounters"],
+    queryKey: ['fhir-encounters'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("fhir_encounters")
-        .select("*, fhir_patients(name_family, name_given)")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+        .from('fhir_encounters')
+        .select('*, fhir_patients(name_family, name_given)')
+        .order('created_at', { ascending: false });
+      if (error || !data || data.length === 0) return getMockEncounterRows();
       return data;
     },
   });
 
-  const inProgress = encounters?.filter((e) => e.status === "in-progress").length ?? 0;
-  const completed = encounters?.filter((e) => e.status === "completed").length ?? 0;
+  const inProgress = encounters?.filter((e) => e.status === 'in-progress').length ?? 0;
+  const completed = encounters?.filter((e) => e.status === 'completed' || e.status === 'finished').length ?? 0;
 
   return (
     <DashboardLayout>
@@ -43,7 +44,7 @@ export default function EncountersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Patient</TableHead>
-                <TableHead>Class</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Period Start</TableHead>
                 <TableHead>Period End</TableHead>
@@ -62,14 +63,14 @@ export default function EncountersPage() {
               {encounters?.map((e) => (
                 <TableRow key={e.id}>
                   <TableCell className="font-medium">
-                    {(e as any).fhir_patients?.name_family ?? "Unknown"}
+                    {(e as any).fhir_patients?.name_family ?? 'Unknown'}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{e.class_display ?? e.class_code}</TableCell>
+                  <TableCell className="text-sm">{e.type_display ?? e.class_display ?? e.class_code}</TableCell>
                   <TableCell><StatusBadge status={e.status} /></TableCell>
-                  <TableCell>{e.period_start ? format(new Date(e.period_start), "MMM d, yyyy HH:mm") : "—"}</TableCell>
-                  <TableCell>{e.period_end ? format(new Date(e.period_end), "MMM d, yyyy HH:mm") : "—"}</TableCell>
+                  <TableCell>{e.period_start ? format(new Date(e.period_start), 'MMM d, yyyy HH:mm') : '—'}</TableCell>
+                  <TableCell>{e.period_end ? format(new Date(e.period_end), 'MMM d, yyyy HH:mm') : '—'}</TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
-                    {e.location_display ?? "—"}
+                    {e.location_display ?? '—'}
                   </TableCell>
                 </TableRow>
               ))}

@@ -6,6 +6,7 @@ import { PatientViewer } from './clinical/PatientViewer';
 import { TelemetryPanel } from './clinical/TelemetryPanel';
 import { EncounterTimeline } from './clinical/EncounterTimeline';
 import { Activity, Play, Square } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface ClinicalDashboardProps {
   patientId?: string;
@@ -22,23 +23,21 @@ export function ClinicalDashboard({ patientId = 'patient-001' }: ClinicalDashboa
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Activity className="w-6 h-6 text-aegis-400" />
+          <Activity className="w-6 h-6 text-primary" />
           <div>
-            <h1 className="text-xl font-bold text-white">Clinician Dashboard</h1>
-            <p className="text-sm text-gray-400">Real-time surgical monitoring &amp; FHIR patient data</p>
+            <h1 className="text-xl font-bold text-foreground">Clinician Dashboard</h1>
+            <p className="text-sm text-muted-foreground">Real-time surgical monitoring &amp; FHIR patient data</p>
           </div>
         </div>
-        <button
+        <Button
           onClick={isStreaming ? stopStream : startStream}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            isStreaming
-              ? 'bg-red-900 text-red-200 hover:bg-red-800'
-              : 'bg-aegis-700 text-white hover:bg-aegis-600'
-          }`}
+          variant={isStreaming ? 'destructive' : 'default'}
+          size="sm"
+          className="gap-2"
         >
           {isStreaming ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           {isStreaming ? 'Stop Telemetry' : 'Start Telemetry'}
-        </button>
+        </Button>
       </div>
 
       <AnomalyAlertBanner alerts={alerts} onDismiss={dismissAlert} onAcknowledge={acknowledgeAlert} />

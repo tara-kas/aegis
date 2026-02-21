@@ -2,6 +2,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ThemeProvider } from 'next-themes';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import Auth from './pages/Auth';
@@ -38,24 +39,26 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
 }
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/auth" element={<AuthRoute><Auth /></AuthRoute>} />
-          <Route path="/" element={<ProtectedRoute><PatientsPage /></ProtectedRoute>} />
-          <Route path="/encounters" element={<ProtectedRoute><EncountersPage /></ProtectedRoute>} />
-          <Route path="/observations" element={<ProtectedRoute><ObservationsPage /></ProtectedRoute>} />
-          <Route path="/clinical" element={<ProtectedRoute><ClinicalPage /></ProtectedRoute>} />
-          <Route path="/financial" element={<ProtectedRoute><FinancialPage /></ProtectedRoute>} />
-          <Route path="/compliance" element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+  <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/auth" element={<AuthRoute><Auth /></AuthRoute>} />
+            <Route path="/" element={<ProtectedRoute><PatientsPage /></ProtectedRoute>} />
+            <Route path="/encounters" element={<ProtectedRoute><EncountersPage /></ProtectedRoute>} />
+            <Route path="/observations" element={<ProtectedRoute><ObservationsPage /></ProtectedRoute>} />
+            <Route path="/clinical" element={<ProtectedRoute><ClinicalPage /></ProtectedRoute>} />
+            <Route path="/financial" element={<ProtectedRoute><FinancialPage /></ProtectedRoute>} />
+            <Route path="/compliance" element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;
