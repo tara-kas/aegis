@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { ClinicalDashboard } from '../ClinicalDashboard';
 
 function renderWithRouter(ui: React.ReactElement) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>);
+  return render(<MemoryRouter><TooltipProvider>{ui}</TooltipProvider></MemoryRouter>);
 }
 
 describe('ClinicalDashboard', () => {

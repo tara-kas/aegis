@@ -1,5 +1,7 @@
 import type { KinematicFrame, ConnectionStatus } from '../../types/telemetry';
 import { Radio, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { getRoboticDevice } from '@/lib/device-registry';
 
 interface TelemetryPanelProps {
   deviceId: string;
@@ -17,15 +19,30 @@ const STATUS_CONFIG: Record<ConnectionStatus, { icon: typeof Wifi; label: string
 export function TelemetryPanel({ deviceId, latestFrame, connectionStatus }: TelemetryPanelProps) {
   const statusCfg = STATUS_CONFIG[connectionStatus];
   const StatusIcon = statusCfg.icon;
+  const robot = getRoboticDevice();
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border bg-muted/50 p-3">
-        <div className="flex items-center gap-2">
-          <Radio className="w-4 h-4 text-primary" />
-          <h3 className="text-sm font-medium text-foreground/80">Robotic Telemetry</h3>
-          <span className="text-xs font-mono text-muted-foreground">{deviceId}</span>
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-2 cursor-default">
+              <Radio className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-medium text-foreground/80">Robotic Telemetry</h3>
+              <span className="text-xs font-mono text-muted-foreground">{deviceId}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <div className="space-y-1 text-xs">
+              <p className="font-semibold">{robot.manufacturer}</p>
+              <p className="text-muted-foreground">{robot.model}</p>
+              <p className="text-muted-foreground">{robot.type}</p>
+              <p className="font-mono text-[10px] text-muted-foreground/70">
+                ID {robot.id} · CE Class {robot.ceMarkClass}
+              </p>
+            </div>
+          </TooltipContent>
+        </Tooltip>
         <div className={`flex items-center gap-1.5 text-xs ${statusCfg.color}`}>
           <StatusIcon className="w-3.5 h-3.5" />
           <span>{statusCfg.label}</span>

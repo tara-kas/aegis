@@ -541,16 +541,42 @@ export const mockAuditEntries: AuditEntry[] = [
 
 let _vitalTickCounter = 0;
 
-/** Produces a new set of vital signs with realistic drift */
+/**
+ * Physiologically realistic drift rates per LOINC code.
+ * Each parameter changes at a clinically plausible speed per ~1s tick:
+ *  - Heart rate: ±1–2 bpm (sympathetic/vagal tone shifts)
+ *  - SpO₂: ±0.2–0.3 % (very stable under GA with controlled ventilation)
+ *  - Systolic/Diastolic BP: ±1–2 mmHg (beat-to-beat variability)
+ *  - EtCO₂: ±0.3–0.5 mmHg (ventilator-regulated, slow drift)
+ *  - Resp rate: ±0.2–0.3 /min (ventilator-set, near-constant)
+ *  - Core temperature: ±0.01–0.02 °C (thermal inertia — changes over 10–15 min)
+ */
+const DRIFT_CONFIG: Record<string, { maxDrift: number; trendThreshold: number; meanReversion: number }> = {
+  '8867-4': { maxDrift: 1.5,  trendThreshold: 1.0,  meanReversion: 0.02 },  // Heart rate
+  '2708-6': { maxDrift: 0.25, trendThreshold: 0.3,  meanReversion: 0.05 },  // SpO₂
+  '8480-6': { maxDrift: 1.5,  trendThreshold: 1.5,  meanReversion: 0.02 },  // Systolic BP
+  '8462-4': { maxDrift: 1.0,  trendThreshold: 1.0,  meanReversion: 0.02 },  // Diastolic BP
+  '19889-5': { maxDrift: 0.4, trendThreshold: 0.5,  meanReversion: 0.03 },  // EtCO₂
+  '9279-1': { maxDrift: 0.25, trendThreshold: 0.3,  meanReversion: 0.04 },  // Resp rate
+  '8310-5': { maxDrift: 0.015, trendThreshold: 0.05, meanReversion: 0.01 }, // Temperature
+};
+const DEFAULT_DRIFT = { maxDrift: 0.5, trendThreshold: 0.5, meanReversion: 0.02 };
+
+/** Produces a new set of vital signs with physiologically realistic drift */
 export function tickVitalSigns(current: VitalSign[]): VitalSign[] {
   _vitalTickCounter++;
   return current.map((v) => {
-    const drift = (Math.random() - 0.5) * 2;
-    const newValue = Math.round((v.value + drift) * 10) / 10;
-    const clamped = Math.max(v.normalRange.low * 0.7, Math.min(v.normalRange.high * 1.3, newValue));
+    const cfg = DRIFT_CONFIG[v.code] ?? DEFAULT_DRIFT;
+    const midpoint = (v.normalRange.low + v.normalRange.high) / 2;
+    const reversion = (midpoint - v.value) * cfg.meanReversion;
+    const noise = (Math.random() - 0.5) * 2 * cfg.maxDrift;
+    const raw = v.value + noise + reversion;
+    const precision = v.code === '8310-5' ? 10 : 10;
+    const newValue = Math.round(raw * precision) / precision;
+    const clamped = Math.max(v.normalRange.low * 0.85, Math.min(v.normalRange.high * 1.15, newValue));
     let trend: VitalSign['trend'] = 'stable';
-    if (clamped > v.value + 0.5) trend = 'rising';
-    else if (clamped < v.value - 0.5) trend = 'falling';
+    if (clamped > v.value + cfg.trendThreshold) trend = 'rising';
+    else if (clamped < v.value - cfg.trendThreshold) trend = 'falling';
     return { ...v, value: clamped, trend, timestamp: new Date().toISOString() };
   });
 }

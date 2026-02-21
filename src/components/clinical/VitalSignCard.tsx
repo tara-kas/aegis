@@ -1,5 +1,7 @@
 import type { VitalSign, Thresholds } from '../../types/telemetry';
 import { Heart, Wind, Thermometer, Activity, Droplets } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { getDeviceForVital } from '@/lib/device-registry';
 
 interface VitalSignCardProps {
   vital: VitalSign;
@@ -33,8 +35,9 @@ function getTrendArrow(trend: VitalSign['trend']): string {
 export function VitalSignCard({ vital }: VitalSignCardProps) {
   const Icon = VITAL_ICONS[vital.code] ?? Activity;
   const color = getSeverityColor(vital.value, vital.normalRange);
+  const device = getDeviceForVital(vital.code);
 
-  return (
+  const card = (
     <div className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -55,5 +58,23 @@ export function VitalSignCard({ vital }: VitalSignCardProps) {
         </span>
       </div>
     </div>
+  );
+
+  if (!device) return card;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{card}</TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">
+        <div className="space-y-1 text-xs">
+          <p className="font-semibold">{device.manufacturer}</p>
+          <p className="text-muted-foreground">{device.model}</p>
+          <p className="text-muted-foreground">{device.type}</p>
+          <p className="font-mono text-[10px] text-muted-foreground/70">
+            ID {device.id} · CE Class {device.ceMarkClass}
+          </p>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }

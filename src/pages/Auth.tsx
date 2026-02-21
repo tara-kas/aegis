@@ -1,16 +1,17 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { signIn, signUp } from "@/lib/supabase-helpers";
-import { toast } from "sonner";
-import { Shield, Activity } from "lucide-react";
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { signIn, signUp } from '@/lib/supabase-helpers';
+import { toast } from 'sonner';
+import { Shield, Activity } from 'lucide-react';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -23,21 +24,25 @@ export default function Auth() {
       if (error) {
         toast.error(error.message);
       } else {
-        navigate("/");
+        navigate('/');
       }
     } else {
       const { error } = await signUp(email, password);
       if (error) {
         toast.error(error.message);
       } else {
-        toast.success("Check your email to confirm your account.");
+        toast.success('Check your email to confirm your account.');
       }
     }
     setLoading(false);
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-3">
           <div className="flex items-center gap-2 text-primary">
@@ -50,11 +55,11 @@ export default function Auth() {
 
         <Card>
           <CardHeader>
-            <CardTitle>{isLogin ? "Sign In" : "Create Account"}</CardTitle>
+            <CardTitle>{isLogin ? 'Sign In' : 'Create Account'}</CardTitle>
             <CardDescription>
               {isLogin
-                ? "Enter your credentials to access the clinician dashboard."
-                : "Register a new clinician account."}
+                ? 'Enter your credentials to access the clinician dashboard.'
+                : 'Register a new clinician account.'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -75,7 +80,7 @@ export default function Auth() {
                 minLength={6}
               />
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Processing…" : isLogin ? "Sign In" : "Sign Up"}
+                {loading ? 'Processing…' : isLogin ? 'Sign In' : 'Sign Up'}
               </Button>
             </form>
             <Button
@@ -83,7 +88,7 @@ export default function Auth() {
               className="mt-3 w-full text-muted-foreground"
               onClick={() => setIsLogin(!isLogin)}
             >
-              {isLogin ? "Need an account? Sign up" : "Already have an account? Sign in"}
+              {isLogin ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
             </Button>
           </CardContent>
         </Card>
