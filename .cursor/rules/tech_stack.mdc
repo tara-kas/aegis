@@ -1,0 +1,52 @@
+---
+description: Technology stack and development guidelines for the Aegis project
+---
+
+# Technology Stack Guide
+
+## Project Overview
+
+Aegis is an autonomous AI surgical monitoring and clinical workflow agent. This guide outlines the technology stack and development standards.
+
+## Development Standards
+
+### Code Quality
+- Write clean, maintainable, and well-documented code
+- Follow language-specific style guides and best practices
+- Include type hints/annotations where applicable
+- Write unit tests for critical functionality
+- Use meaningful variable and function names
+
+### Healthcare Data Handling
+- Always follow HIPAA compliance requirements
+- Encrypt sensitive data in transit and at rest
+- Implement proper authentication and authorization
+- Log access to PHI (Protected Health Information) appropriately
+- Never commit sensitive data or credentials to version control
+
+### API Design
+- Use RESTful principles for API endpoints
+- Follow FHIR REST API conventions for healthcare data
+- Implement proper error handling and status codes
+- Include API versioning in endpoints
+- Document APIs with OpenAPI/Swagger specifications
+
+### Real-time Monitoring
+- Use appropriate protocols for real-time data streaming (WebSockets, MQTT, etc.)
+- Implement proper buffering and error recovery for monitoring data
+- Handle connection failures gracefully
+- Ensure low-latency processing for critical monitoring alerts
+
+### Testing
+- Write tests for all critical paths
+- Include integration tests for FHIR API interactions
+- Test error scenarios and edge cases
+- Maintain good test coverage for core functionality
+
+## Architecture Principles
+
+- **Modularity**: Design components to be loosely coupled and highly cohesive
+- **Scalability**: Consider horizontal scaling for monitoring and processing workloads
+- **Reliability**: Implement proper error handling, retries, and fallback mechanisms
+- **Security**: Follow defense-in-depth security principles
+- **Observability**: Include logging, metrics, and tracing for system monitoring
