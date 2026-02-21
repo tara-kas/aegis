@@ -16,6 +16,7 @@ import {
     createAuditorKey,
     lamportsToSol,
     solToLamports,
+    MAX_PENDING_BALANCE,
     type ElGamalPublicKey,
     type ConfidentialMintConfig,
     type ConfidentialAccountConfig,
@@ -471,6 +472,121 @@ describe('Solana Token-2022 Confidential Transfer Module', () => {
             const sol = lamportsToSol(lamports);
 
             expect(sol).toBeCloseTo(0.123456789, 8);
+        });
+
+        it('should convert zero SOL to zero lamports', () => {
+            const lamports = solToLamports(0);
+            expect(lamports).toBe(BigInt(0));
+        });
+
+        it('should handle sub-cent SOL values in lamports conversion', () => {
+            const lamports = solToLamports(0.000000001);
+            expect(lamports).toBe(BigInt(1));
+        });
+    });
+
+    describe('Security: Pending Balance Threshold', () => {
+        it('FAILSAFE: MAX_PENDING_BALANCE constant should be 1 SOL', () => {
+            expect(MAX_PENDING_BALANCE).toBe(BigInt(1_000_000_000));
+        });
+
+        it('FAILSAFE: pending balance should never exceed MAX_PENDING_BALANCE in mock', async () => {
+            const result = await client.getConfidentialBalance(mockPayerAccount);
+
+            expect(result.balance!.pendingLamports).toBeLessThanOrEqual(MAX_PENDING_BALANCE);
+        });
+    });
+
+    describe('Edge Cases: Invalid Inputs', () => {
+        it('should handle negative transfer amounts gracefully', async () => {
+            const negativeParams: ConfidentialTransferParams = {
+                source: mockPayerAccount,
+                destination: mockPayeeAccount,
+                amountLamports: BigInt(-100),
+                owner: mockPayerAccount,
+            };
+
+            const result = await client.executeConfidentialTransfer(negativeParams);
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Transfer amount must be positive');
+        });
+
+        it('should handle empty string mint authority in config', async () => {
+            const badConfig: ConfidentialMintConfig = {
+                decimals: 9,
+                mintAuthority: '',
+                auditorElGamalKey: mockHospitalAuditorKey,
+            };
+
+            // Client should still attempt creation (server-side validates authority)
+            const result = await client.createConfidentialMint(badConfig);
+            // Succeeds in mock since only ElGamal key is validated client-side
+            expect(result).toBeDefined();
+        });
+
+        it('should create accounts for different owners', async () => {
+            const config1: ConfidentialAccountConfig = {
+                owner: 'UniqueOwner1XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+                mint: 'SharedMintXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+                enableConfidentialTransfers: true,
+            };
+
+            const config2: ConfidentialAccountConfig = {
+                owner: 'UniqueOwner2XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+                mint: 'SharedMintXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+                enableConfidentialTransfers: true,
+            };
+
+            const result1 = await client.createConfidentialAccount(config1);
+            const result2 = await client.createConfidentialAccount(config2);
+
+            expect(result1.success).toBe(true);
+            expect(result1.accountAddress).toBeDefined();
+            expect(result2.success).toBe(true);
+            expect(result2.accountAddress).toBeDefined();
+        });
+    });
+
+    describe('HIPAA: No Plaintext Leakage in Any Response', () => {
+        it('should never expose plaintext amounts in transfer result signature', async () => {
+            const amount = BigInt(777_777_777);
+            const result = await client.executeConfidentialTransfer({
+                source: mockPayerAccount,
+                destination: mockPayeeAccount,
+                amountLamports: amount,
+                owner: mockPayerAccount,
+            });
+
+            // Signature should not contain the plaintext amount
+            expect(result.signature).not.toContain('777777777');
+            expect(result.signature).not.toContain('0.777');
+        });
+
+        it('should not leak amounts through micropayment stream metadata', async () => {
+            const sensitiveRate = BigInt(123_456);
+            const result = await client.createMicropaymentStream(
+                mockPayerAccount,
+                mockPayeeAccount,
+                sensitiveRate
+            );
+
+            const streamId = result.stream!.streamId;
+            // Stream ID should not encode the rate
+            expect(streamId).not.toContain('123456');
+        });
+
+        it('COMPLIANCE: balance response fields use BigInt not number (prevents precision loss)', async () => {
+            const result = await client.getConfidentialBalance(mockPayerAccount);
+            const balance = result.balance!;
+
+            // BigInt ensures no JavaScript floating-point precision loss
+            expect(typeof balance.availableLamports).toBe('bigint');
+            expect(typeof balance.pendingLamports).toBe('bigint');
+            expect(typeof balance.totalLamports).toBe('bigint');
+
+            // Verify arithmetic is exact (no floating-point drift)
+            const sum = balance.availableLamports + balance.pendingLamports;
+            expect(sum).toBe(balance.totalLamports);
         });
     });
 

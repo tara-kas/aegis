@@ -42,6 +42,9 @@ pnpm-debug.log*
 *.swo
 *~
 
+# Solana wallet keypair — NEVER commit private keys
+aegis-wallet.json
+
 # Temporary documentation (consolidated into main docs)
 PHASE_5_COMPLETE.md
 HACKATHON_COMPLETE.md

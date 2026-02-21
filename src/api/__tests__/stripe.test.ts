@@ -499,5 +499,102 @@ describe('Stripe ACP Module', () => {
             expect(completeResponse.success).toBe(true);
             expect(completeResponse.status).toBe('succeeded');
         });
+
+        it('should handle idempotent retry with same requestId', async () => {
+            const client = new StripeCheckoutClient(mockConfig);
+            const fetchMock = vi.fn();
+            global.fetch = fetchMock;
+
+            const idempotentRequest: CreateCheckoutRequest = {
+                ...validCheckoutRequest,
+                requestId: 'req_idempotent_retry_001',
+            };
+
+            // First call succeeds
+            fetchMock.mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => mockSuccessfulCheckoutResponse,
+            });
+
+            const firstResponse = await client.createCheckout(idempotentRequest);
+            expect(firstResponse.success).toBe(true);
+
+            // Second call with same requestId also succeeds (Stripe handles idempotency)
+            fetchMock.mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => mockSuccessfulCheckoutResponse,
+            });
+
+            const secondResponse = await client.createCheckout(idempotentRequest);
+            expect(secondResponse.success).toBe(true);
+            expect(secondResponse.checkoutSessionId).toBe(firstResponse.checkoutSessionId);
+        });
+
+        it('FAILSAFE: should enforce limit even with maximum integer quantity', async () => {
+            const highQuantityRequest: CreateCheckoutRequest = {
+                ...validCheckoutRequest,
+                lineItems: [
+                    {
+                        description: 'Cheap item with high quantity',
+                        amountCents: 1, // $0.01
+                        quantity: 10_000_001, // Total = $100,000.01 — exceeds limit
+                    },
+                ],
+            };
+
+            const result = validateCheckoutRequest(highQuantityRequest);
+            expect(result.valid).toBe(false);
+            expect(result.errors.some(e => e.includes('exceeds autonomous purchase limit'))).toBe(true);
+        });
+
+        it('should handle HTTP 429 rate limit response gracefully', async () => {
+            const client = new StripeCheckoutClient(mockConfig);
+            const fetchMock = vi.fn();
+            global.fetch = fetchMock;
+
+            fetchMock.mockResolvedValueOnce({
+                ok: false,
+                status: 429,
+                text: async () => 'Rate limit exceeded. Retry after 1 second.',
+            });
+
+            const response = await client.createCheckout(validCheckoutRequest);
+
+            expect(response.success).toBe(false);
+            expect(response.errorCode).toBe('STRIPE_API_ERROR');
+            expect(response.error).toContain('429');
+        });
+
+        it('should handle HTTP 500 internal server error gracefully', async () => {
+            const client = new StripeCheckoutClient(mockConfig);
+            const fetchMock = vi.fn();
+            global.fetch = fetchMock;
+
+            fetchMock.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                text: async () => 'Internal Server Error',
+            });
+
+            const response = await client.createCheckout(validCheckoutRequest);
+
+            expect(response.success).toBe(false);
+            expect(response.errorCode).toBe('STRIPE_API_ERROR');
+        });
+
+        it('FAILSAFE: should reject metadata containing nested credential-like values', () => {
+            const nestedCredentialRequest = {
+                ...validCheckoutRequest,
+                metadata: {
+                    note: 'Please charge cardNumber 4242424242424242',
+                },
+            };
+
+            const result = validateCheckoutRequest(nestedCredentialRequest as CreateCheckoutRequest);
+            expect(result.valid).toBe(false);
+            expect(result.errors.some(e => e.includes('cardNumber') || e.includes('SECURITY VIOLATION'))).toBe(true);
+        });
     });
 });
