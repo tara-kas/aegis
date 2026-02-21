@@ -1,0 +1,505 @@
+/**
+ * Unit Tests for Stripe Agentic Commerce Protocol (ACP) Integration
+ * 
+ * These tests verify:
+ * 1. FAILSAFE CHECK 1: Payment credentials are never exposed in payloads
+ * 2. FAILSAFE CHECK 2: $1000 limit is strictly enforced
+ * 3. Shared Payment Token (SPT) is correctly returned
+ * 4. Validation logic prevents malformed requests
+ * 
+ * All Stripe API calls are mocked to ensure tests run without network dependencies.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  StripeACPClient,
+  validateCheckoutRequest,
+  MAX_AUTONOMOUS_PURCHASE_CENTS,
+  type CreateCheckoutRequest,
+  type CheckoutLineItem,
+  type StripeEnvironmentConfig,
+} from '../stripe';
+
+// ─── Test Fixtures ───────────────────────────────────────────────────────────
+
+const mockConfig: StripeEnvironmentConfig = {
+  publishableKey: 'pk_test_mock123',
+  secretKey: 'sk_test_mock456',
+  networkId: 'net_test_aegis_surgical',
+};
+
+const validLineItems: CheckoutLineItem[] = [
+  {
+    description: 'AWS Cloud Compute - Pre-operative Planning',
+    amountCents: 50000, // $500
+    quantity: 1,
+    sku: 'CLOUD-COMPUTE-001',
+  },
+  {
+    description: 'Disposable Robotic Attachment - Da Vinci Tool',
+    amountCents: 25000, // $250
+    quantity: 2,
+    sku: 'ROBOT-ATTACH-DV-002',
+  },
+];
+
+const validCheckoutRequest: CreateCheckoutRequest = {
+  requestId: 'req_aegis_20260221_001',
+  lineItems: validLineItems,
+  merchantId: 'merchant_surgical_supply_co',
+  currency: 'USD',
+  agentId: 'aegis-surgical-agent-v1',
+  metadata: {
+    hospitalId: 'hosp_beth_israel',
+    procedureType: 'robotic_laparoscopy',
+    urgency: 'routine',
+  },
+};
+
+// ─── Mock Stripe API Responses ───────────────────────────────────────────────
+
+const mockSuccessfulCheckoutResponse = {
+  id: 'cs_test_mock_checkout_session_123',
+  shared_payment_token: 'spt_test_1234567890abcdef',
+  amount: 100000, // Should match the total from validLineItems
+  currency: 'USD',
+  expires_at: new Date(Date.now() + 3600000).toISOString(), // Expires in 1 hour
+  status: 'created',
+};
+
+const mockSuccessfulCompleteResponse = {
+  payment_intent_id: 'pi_test_mock_payment_intent_456',
+  amount_captured: 100000,
+  status: 'succeeded' as const,
+};
+
+// ─── Test Suite ──────────────────────────────────────────────────────────────
+
+describe('Stripe ACP Module', () => {
+  describe('validateCheckoutRequest', () => {
+    it('should accept a valid checkout request', () => {
+      const result = validateCheckoutRequest(validCheckoutRequest);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('FAILSAFE CHECK 2: should reject requests exceeding $1000 limit', () => {
+      const overLimitRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [
+          {
+            description: 'Expensive Cloud Cluster',
+            amountCents: 150000, // $1500 - exceeds $1000 limit
+            quantity: 1,
+          },
+        ],
+      };
+
+      const result = validateCheckoutRequest(overLimitRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain(
+        'Amount exceeds autonomous purchase limit: $1500.00 > $1000.00'
+      );
+    });
+
+    it('FAILSAFE CHECK 2: should accept requests exactly at $1000 limit', () => {
+      const atLimitRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [
+          {
+            description: 'Maximum Allowed Purchase',
+            amountCents: MAX_AUTONOMOUS_PURCHASE_CENTS, // Exactly $1000
+            quantity: 1,
+          },
+        ],
+      };
+
+      const result = validateCheckoutRequest(atLimitRequest);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('FAILSAFE CHECK 2: should correctly calculate total across multiple line items', () => {
+      const multiItemRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [
+          { description: 'Item A', amountCents: 40000, quantity: 2 }, // $800
+          { description: 'Item B', amountCents: 20100, quantity: 1 }, // $201
+        ],
+      };
+      // Total: $1001 - should fail
+
+      const result = validateCheckoutRequest(multiItemRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('exceeds autonomous purchase limit'))).toBe(true);
+    });
+
+    it('FAILSAFE CHECK 1: should detect prohibited credential fields in payload', () => {
+      const dangerousRequest = {
+        ...validCheckoutRequest,
+        metadata: {
+          ...validCheckoutRequest.metadata,
+          cardNumber: '4242424242424242', // Dangerous!
+        },
+      } as CreateCheckoutRequest;
+
+      const result = validateCheckoutRequest(dangerousRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('SECURITY VIOLATION'))).toBe(true);
+      expect(result.errors.some(e => e.includes('cardNumber'))).toBe(true);
+    });
+
+    it('FAILSAFE CHECK 1: should detect multiple prohibited fields', () => {
+      const multiDangerousRequest = {
+        ...validCheckoutRequest,
+        lineItems: [
+          {
+            description: 'Test',
+            amountCents: 1000,
+            quantity: 1,
+            cvv: '123',
+            apiKey: 'secret_key_123',
+          } as CheckoutLineItem,
+        ],
+      };
+
+      const result = validateCheckoutRequest(multiDangerousRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors.filter(e => e.includes('SECURITY VIOLATION')).length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should reject requests with zero or negative amounts', () => {
+      const zeroAmountRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [{ description: 'Free item', amountCents: 0, quantity: 1 }],
+      };
+
+      const result = validateCheckoutRequest(zeroAmountRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Total amount must be greater than zero'))).toBe(true);
+    });
+
+    it('should reject requests with missing required fields', () => {
+      const missingFieldsRequest = {
+        ...validCheckoutRequest,
+        requestId: '',
+        merchantId: '',
+        agentId: '',
+      };
+
+      const result = validateCheckoutRequest(missingFieldsRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('requestId is required');
+      expect(result.errors).toContain('merchantId is required');
+      expect(result.errors).toContain('agentId is required');
+    });
+
+    it('should reject requests with invalid currency codes', () => {
+      const invalidCurrencyRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        currency: 'US', // Should be 3 letters
+      };
+
+      const result = validateCheckoutRequest(invalidCurrencyRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('currency must be a valid 3-letter ISO 4217 code'))).toBe(true);
+    });
+
+    it('should reject requests with empty line items', () => {
+      const emptyItemsRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [],
+      };
+
+      const result = validateCheckoutRequest(emptyItemsRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('At least one line item is required');
+    });
+
+    it('should validate individual line item fields', () => {
+      const invalidLineItemsRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [
+          { description: '', amountCents: -100, quantity: 0 },
+        ],
+      };
+
+      const result = validateCheckoutRequest(invalidLineItemsRequest);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Line item 0: description is required');
+      expect(result.errors).toContain('Line item 0: amountCents must be greater than zero');
+      expect(result.errors).toContain('Line item 0: quantity must be greater than zero');
+    });
+  });
+
+  describe('StripeACPClient.createCheckout', () => {
+    let client: StripeACPClient;
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      client = new StripeACPClient(mockConfig);
+      
+      // Mock the global fetch function
+      fetchMock = vi.fn();
+      global.fetch = fetchMock;
+    });
+
+    it('should successfully create a checkout and return SPT', async () => {
+      // Mock successful Stripe API response
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCheckoutResponse,
+      });
+
+      const response = await client.createCheckout(validCheckoutRequest);
+
+      expect(response.success).toBe(true);
+      expect(response.sharedPaymentToken).toBe('spt_test_1234567890abcdef');
+      expect(response.amountCents).toBe(100000);
+      expect(response.currency).toBe('USD');
+      expect(response.checkoutSessionId).toBe('cs_test_mock_checkout_session_123');
+      expect(response.expiresAt).toBeDefined();
+    });
+
+    it('CRITICAL TEST: should return valid SPT with $1000 limit enforced', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...mockSuccessfulCheckoutResponse,
+          shared_payment_token: 'spt_1000_limit_enforced_token',
+          amount: MAX_AUTONOMOUS_PURCHASE_CENTS,
+        }),
+      });
+
+      const maxLimitRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [
+          {
+            description: 'Maximum Autonomous Purchase',
+            amountCents: MAX_AUTONOMOUS_PURCHASE_CENTS,
+            quantity: 1,
+          },
+        ],
+      };
+
+      const response = await client.createCheckout(maxLimitRequest);
+
+      expect(response.success).toBe(true);
+      expect(response.sharedPaymentToken).toBeTruthy();
+      expect(response.amountCents).toBe(MAX_AUTONOMOUS_PURCHASE_CENTS);
+      
+      // Verify the token was issued for exactly $1000
+      expect(response.amountCents).toBe(100000);
+    });
+
+    it('should include correct headers in Stripe API call', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCheckoutResponse,
+      });
+
+      await client.createCheckout(validCheckoutRequest);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/v1/acp/checkout_sessions'),
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Authorization': `Bearer ${mockConfig.secretKey}`,
+            'Content-Type': 'application/json',
+            'Stripe-Version': expect.any(String),
+          }),
+        })
+      );
+    });
+
+    it('should include network_id and merchant_id in API payload', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCheckoutResponse,
+      });
+
+      await client.createCheckout(validCheckoutRequest);
+
+      const callPayload = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(callPayload.network_id).toBe(mockConfig.networkId);
+      expect(callPayload.merchant_id).toBe(validCheckoutRequest.merchantId);
+      expect(callPayload.amount).toBe(100000);
+      expect(callPayload.currency).toBe('USD');
+    });
+
+    it('should fail validation before making API call for over-limit requests', async () => {
+      const overLimitRequest: CreateCheckoutRequest = {
+        ...validCheckoutRequest,
+        lineItems: [
+          {
+            description: 'Too Expensive',
+            amountCents: 200000, // $2000
+            quantity: 1,
+          },
+        ],
+      };
+
+      const response = await client.createCheckout(overLimitRequest);
+
+      expect(response.success).toBe(false);
+      expect(response.errorCode).toBe('VALIDATION_FAILED');
+      expect(response.error).toContain('exceeds autonomous purchase limit');
+      
+      // Verify fetch was NEVER called (validation stopped it)
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should handle Stripe API errors gracefully', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 402,
+        text: async () => 'Insufficient funds in network account',
+      });
+
+      const response = await client.createCheckout(validCheckoutRequest);
+
+      expect(response.success).toBe(false);
+      expect(response.errorCode).toBe('STRIPE_API_ERROR');
+      expect(response.error).toContain('Stripe API error: 402');
+    });
+
+    it('should handle network errors', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('Network connection failed'));
+
+      const response = await client.createCheckout(validCheckoutRequest);
+
+      expect(response.success).toBe(false);
+      expect(response.errorCode).toBe('STRIPE_API_ERROR');
+      expect(response.error).toContain('Network connection failed');
+    });
+
+    it('FAILSAFE: should never include credentials in request payload', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCheckoutResponse,
+      });
+
+      await client.createCheckout(validCheckoutRequest);
+
+      const callPayload = JSON.parse(fetchMock.mock.calls[0][1].body);
+      const payloadString = JSON.stringify(callPayload).toLowerCase();
+
+      // Verify no credential fields are present
+      expect(payloadString).not.toContain('cardnumber');
+      expect(payloadString).not.toContain('cvv');
+      expect(payloadString).not.toContain('accountnumber');
+      expect(payloadString).not.toContain('routingnumber');
+      
+      // Only the SPT should be in responses, never in requests
+      expect(callPayload.shared_payment_token).toBeUndefined();
+    });
+  });
+
+  describe('StripeACPClient.completeCheckout', () => {
+    let client: StripeACPClient;
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      client = new StripeACPClient(mockConfig);
+      fetchMock = vi.fn();
+      global.fetch = fetchMock;
+    });
+
+    it('should successfully complete a checkout with SPT', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCompleteResponse,
+      });
+
+      const response = await client.completeCheckout({
+        sharedPaymentToken: 'spt_test_1234567890abcdef',
+        merchantConfirmation: 'cloud_compute_provisioned',
+      });
+
+      expect(response.success).toBe(true);
+      expect(response.paymentIntentId).toBe('pi_test_mock_payment_intent_456');
+      expect(response.capturedAmountCents).toBe(100000);
+      expect(response.status).toBe('succeeded');
+    });
+
+    it('should require sharedPaymentToken', async () => {
+      const response = await client.completeCheckout({
+        sharedPaymentToken: '',
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.error).toBe('sharedPaymentToken is required');
+    });
+
+    it('should handle completion errors gracefully', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => 'Invalid or expired SPT',
+      });
+
+      const response = await client.completeCheckout({
+        sharedPaymentToken: 'spt_expired_token',
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.error).toContain('Stripe API error: 400');
+    });
+  });
+
+  describe('Integration: Full Checkout Flow', () => {
+    it('should complete full autonomous purchase workflow', async () => {
+      const client = new StripeACPClient(mockConfig);
+      const fetchMock = vi.fn();
+      global.fetch = fetchMock;
+
+      // Step 1: Create checkout
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCheckoutResponse,
+      });
+
+      const createResponse = await client.createCheckout({
+        requestId: 'req_integration_test_001',
+        lineItems: [
+          {
+            description: 'Crusoe Cloud GPU Cluster - 2 hours',
+            amountCents: 75000, // $750
+            quantity: 1,
+            sku: 'CRUSOE-GPU-H100',
+          },
+        ],
+        merchantId: 'merchant_crusoe_cloud',
+        currency: 'USD',
+        agentId: 'aegis-surgical-agent-v1',
+      });
+
+      expect(createResponse.success).toBe(true);
+      expect(createResponse.sharedPaymentToken).toBeTruthy();
+      expect(createResponse.amountCents).toBeLessThanOrEqual(MAX_AUTONOMOUS_PURCHASE_CENTS);
+
+      // Step 2: Complete checkout
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCompleteResponse,
+      });
+
+      const completeResponse = await client.completeCheckout({
+        sharedPaymentToken: createResponse.sharedPaymentToken!,
+        merchantConfirmation: 'gpu_cluster_allocated',
+      });
+
+      expect(completeResponse.success).toBe(true);
+      expect(completeResponse.status).toBe('succeeded');
+    });
+  });
+});
