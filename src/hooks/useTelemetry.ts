@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { VitalSign, AnomalyAlert, KinematicFrame, ConnectionStatus } from '../types/telemetry';
+import type { PaidAiTrace, CostBreakdown } from '../types/financial';
+import type { FhirObservation } from '../api/fhir';
 import { mockVitalSigns, mockAnomalyAlerts, tickVitalSigns, maybeGenerateAlert, generateKinematicFrame } from '../mock/data';
+import { traceObservationWorkflow, onTraceRecorded, getTraceStore } from '../api/telemetry-billing';
+import { validateFhirResource } from '../utils/fhirValidation';
+import { createFhirMeta, generateFhirId, formatFhirDateTime } from '../utils/fhirValidation';
 import { logger } from '../utils/logger';
 import { metrics } from '../utils/metrics';
 
@@ -21,9 +26,26 @@ interface UseTelemetryReturn {
   isStreaming: boolean;
   startStream: () => void;
   stopStream: () => void;
+  /** Live billing traces from Paid.ai (updates in real time) */
+  billingTraces: PaidAiTrace[];
+  /** Manually trigger a billing trace for a FHIR Observation */
+  recordObservationBilling: (observation: FhirObservation, workflowId: string, billedAmount: number, costs: CostBreakdown) => Promise<void>;
 }
 
 const log = logger.withContext('Telemetry');
+
+// ─── Default cost structure for auto-generated vital-sign observations ───────
+
+const DEFAULT_VITAL_COSTS: CostBreakdown = {
+  crusoeInference: 0.012,
+  elevenLabsVoice: 0,
+  googleHaiDef: 0.005,
+  supabaseStorage: 0.001,
+  solanaFees: 0.00001,
+  total: 0.01801,
+};
+
+const DEFAULT_VITAL_BILLED = 0.05; // €0.05 per vital-sign observation
 
 export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   const { deviceId, vitalIntervalMs = 2000, kinematicIntervalMs = 100, maxAlerts = 50 } = options;
@@ -33,10 +55,49 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   const [latestFrame, setLatestFrame] = useState<KinematicFrame | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [billingTraces, setBillingTraces] = useState<PaidAiTrace[]>(() => getTraceStore());
 
   const frameCounter = useRef(0);
   const vitalTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const kinematicTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  // ── Subscribe to billing trace events ────────────────────────────────────
+  useEffect(() => {
+    const unsubscribe = onTraceRecorded((trace) => {
+      setBillingTraces((prev) => [...prev, trace]);
+    });
+    return unsubscribe;
+  }, []);
+
+  // ── Manual billing trigger ───────────────────────────────────────────────
+  const recordObservationBilling = useCallback(async (
+    observation: FhirObservation,
+    workflowId: string,
+    billedAmount: number,
+    costs: CostBreakdown,
+  ) => {
+    const result = await traceObservationWorkflow({
+      workflowId,
+      observation,
+      billedAmount,
+      costs,
+      metadata: { deviceId, source: 'manual' },
+    });
+
+    if (result.shouldSettle) {
+      log.info('Billing settlement required', {
+        traceId: result.trace.traceId,
+        billedAmount: result.trace.billedAmount,
+      });
+      metrics.increment('billing.settlement_triggered', { deviceId, workflowId });
+    } else {
+      log.warn('Billing trace failed validation — no settlement', {
+        traceId: result.trace.traceId,
+        issues: result.validationIssues,
+      });
+      metrics.increment('billing.validation_failed', { deviceId, workflowId });
+    }
+  }, [deviceId]);
 
   const acknowledgeAlert = useCallback((alertId: string) => {
     setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, acknowledged: true } : a)));
@@ -75,6 +136,54 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
             setAlerts((a) => [alert, ...a].slice(0, maxAlerts));
             metrics.increment('alerts.generated', { deviceId, severity: alert.severity });
           }
+
+          // ── Auto-bill for each vital-sign observation tick ────────────
+          // Build a minimal FHIR Observation from the first vital sign
+          // and run it through the billing pipeline.
+          const primary = updated[0];
+          if (primary) {
+            const obs: FhirObservation = {
+              resourceType: 'Observation',
+              id: generateFhirId(),
+              meta: createFhirMeta(),
+              status: 'final',
+              category: [{
+                coding: [{
+                  system: 'http://terminology.hl7.org/CodeSystem/observation-category',
+                  code: 'vital-signs',
+                  display: 'Vital Signs',
+                }],
+              }],
+              code: {
+                coding: [{
+                  system: 'http://loinc.org',
+                  code: primary.code,
+                  display: primary.display,
+                }],
+                text: primary.display,
+              },
+              subject: { reference: 'Patient/patient-001' },
+              effectiveDateTime: formatFhirDateTime(),
+              valueQuantity: {
+                value: primary.value,
+                unit: primary.unit,
+                system: 'http://unitsofmeasure.org',
+                code: primary.unit,
+              },
+            };
+
+            // Fire-and-forget — billing must never block vital-sign rendering
+            traceObservationWorkflow({
+              workflowId: 'surgical-obs',
+              observation: obs,
+              billedAmount: DEFAULT_VITAL_BILLED,
+              costs: DEFAULT_VITAL_COSTS,
+              metadata: { deviceId, vitalCode: primary.code },
+            }).catch(() => {
+              // swallow — billing failures must not crash telemetry
+            });
+          }
+
           return updated;
         });
       }, vitalIntervalMs);
@@ -94,5 +203,17 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
     return stopStream;
   }, [startStream, stopStream]);
 
-  return { vitals, alerts, latestFrame, connectionStatus, acknowledgeAlert, dismissAlert, isStreaming, startStream, stopStream };
+  return {
+    vitals,
+    alerts,
+    latestFrame,
+    connectionStatus,
+    acknowledgeAlert,
+    dismissAlert,
+    isStreaming,
+    startStream,
+    stopStream,
+    billingTraces,
+    recordObservationBilling,
+  };
 }

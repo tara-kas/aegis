@@ -1,13 +1,59 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { FinancialDashboard } from '../FinancialDashboard';
+import {
+  mockMargins,
+  mockSolanaTransactions,
+  mockACPStatus,
+  mockSubscriptions,
+  mockRevenueData,
+  mockPaidAiTraces,
+} from '../../mock/data';
+import type { UseFinancialDataReturn } from '../../hooks/useFinancialData';
+
+// ─── Controllable mock for useFinancialData ──────────────────────────────────
+
+const defaultMockReturn: UseFinancialDataReturn = {
+  data: {
+    margins: mockMargins,
+    solanaTransactions: mockSolanaTransactions,
+    acpStatus: mockACPStatus,
+    subscriptions: mockSubscriptions,
+    revenueData: mockRevenueData,
+    paidAiTraces: mockPaidAiTraces,
+  },
+  loading: {
+    isLoading: false,
+    stripeLoading: false,
+    solanaLoading: false,
+    marginsLoading: false,
+  },
+  errors: {
+    stripeError: null,
+    solanaError: null,
+    marginsError: null,
+    hasError: false,
+  },
+  refresh: vi.fn(),
+  isLive: false,
+};
+
+let currentMockReturn = { ...defaultMockReturn };
+
+vi.mock('../../hooks/useFinancialData', () => ({
+  useFinancialData: () => currentMockReturn,
+}));
 
 function renderWithRouter(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
 
 describe('FinancialDashboard', () => {
+  beforeEach(() => {
+    currentMockReturn = { ...defaultMockReturn };
+  });
+
   it('should render the dashboard heading', () => {
     renderWithRouter(<FinancialDashboard />);
     expect(screen.getByText('Financial Dashboard')).toBeInTheDocument();
@@ -44,5 +90,39 @@ describe('FinancialDashboard', () => {
     renderWithRouter(<FinancialDashboard />);
     const badges = screen.getAllByText('Confidential');
     expect(badges.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should show skeleton loaders when data is loading', () => {
+    currentMockReturn = {
+      ...defaultMockReturn,
+      loading: {
+        isLoading: true,
+        stripeLoading: true,
+        solanaLoading: true,
+        marginsLoading: true,
+      },
+    };
+
+    renderWithRouter(<FinancialDashboard />);
+    // Heading is always visible regardless of loading state
+    expect(screen.getByText('Financial Dashboard')).toBeInTheDocument();
+    // The numeric KPI values should NOT be rendered while loading
+    expect(screen.queryByText('€210.00')).not.toBeInTheDocument();
+  });
+
+  it('should show error banner when APIs fail', () => {
+    currentMockReturn = {
+      ...defaultMockReturn,
+      errors: {
+        stripeError: 'Stripe keys not configured',
+        solanaError: null,
+        marginsError: null,
+        hasError: true,
+      },
+    };
+
+    renderWithRouter(<FinancialDashboard />);
+    expect(screen.getByText(/Stripe: Stripe keys not configured/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing cached \/ mock data as fallback/)).toBeInTheDocument();
   });
 });
