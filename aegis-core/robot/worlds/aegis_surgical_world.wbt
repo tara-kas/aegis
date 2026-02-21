@@ -1,0 +1,46 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/universal_robots/protos/UR5e.proto"
+
+WorldInfo {
+}
+Viewpoint {
+  orientation -0.1465680657619282 0.22566704850176528 0.9631158732568522 1.1866408640616206
+  position -0.7388453155706312 -1.2000748810672952 0.6249103012276656
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+}
+UR5e {
+  hidden position_0_0 0.072958491200186
+  hidden rotation_1 0 0 1 0.07295849120018354
+  hidden position_1_0 -0.28211658363645226
+  hidden linearVelocity_1 0.005472611759791663 0.00042327255254179344 -1.7378717324871118e-05
+  hidden angularVelocity_1 5.460602958500732e-06 1.5215170057127935e-05 0.2145022284883238
+  hidden rotation_2 0 1 0 1.2886794163635478
+  hidden position_2_0 0.0466427394221795
+  hidden linearVelocity_2 -0.029817743656498447 0.04188280634565379 -0.00980471868966601
+  hidden angularVelocity_2 -0.0035002848639487934 0.047709537213633545 0.21452114392850186
+  hidden rotation_3 0 0.9999999999999999 0 0.046642739422183
+  hidden position_3_0 0.05229687571368946
+  hidden linearVelocity_3 0.0022744632638523688 0.11942887470037292 -0.046962432974533876
+  hidden angularVelocity_3 -0.013387986977246552 0.18716543317122408 0.21452562833983396
+  hidden rotation_4 0 1 0 1.623092875713689
+  hidden position_4_0 0.02911569316336668
+  hidden linearVelocity_4 -0.01790099866440823 0.16862705677445874 -0.0911328222975728
+  hidden angularVelocity_4 -0.024379697665184302 0.3425634925220677 0.21453273250958116
+  hidden rotation_5 0 0 0.9999999999999999 0.029115693163371165
+  hidden position_5_0 0.020371163142899714
+  hidden linearVelocity_5 -0.05185972077983676 0.17019954121830755 -0.09741259105133754
+  hidden angularVelocity_5 -0.008681596904301583 0.3436966983552918 0.12915759694887272
+  hidden rotation_6 0 1 0 0.0203711631429069
+  hidden linearVelocity_6 -0.06088414710538373 0.16981955411679425 -0.09699941519557352
+  hidden angularVelocity_6 -0.011183834609083811 0.4027634278805617 0.12949427228241345
+  controller "<extern>"
+}
