@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 220 25% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 10%;
+
+    --primary: 199 89% 38%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 92%;
+    --secondary-foreground: 220 25% 10%;
+
+    --muted: 220 14% 95%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 168 76% 36%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 89%;
+    --input: 220 13% 89%;
+    --ring: 199 89% 38%;
+
+    --radius: 0.5rem;
+
+    /* Aegis custom tokens */
+    --clinical-blue: 199 89% 38%;
+    --clinical-blue-foreground: 0 0% 100%;
+    --vital-green: 168 76% 36%;
+    --vital-green-foreground: 0 0% 100%;
+    --alert-amber: 38 92% 50%;
+    --alert-amber-foreground: 0 0% 100%;
+    --critical-red: 0 72% 51%;
+    --critical-red-foreground: 0 0% 100%;
+    --telemetry-cyan: 187 85% 53%;
+    --surface-elevated: 0 0% 100%;
+    --surface-sunken: 220 20% 95%;
+
+    --sidebar-background: 220 25% 10%;
+    --sidebar-foreground: 220 14% 85%;
+    --sidebar-primary: 199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 16%;
+    --sidebar-accent-foreground: 220 14% 85%;
+    --sidebar-border: 220 20% 18%;
+    --sidebar-ring: 199 89% 48%;
+  }
+
+  .dark {
+    --background: 220 25% 7%;
+    --foreground: 220 14% 92%;
+
+    --card: 220 25% 10%;
+    --card-foreground: 220 14% 92%;
+
+    --popover: 220 25% 10%;
+    --popover-foreground: 220 14% 92%;
+
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 20% 16%;
+    --secondary-foreground: 220 14% 92%;
+
+    --muted: 220 20% 14%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 168 76% 42%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 20% 18%;
+    --input: 220 20% 18%;
+    --ring: 199 89% 48%;
+
+    --clinical-blue: 199 89% 48%;
+    --vital-green: 168 76% 42%;
+    --alert-amber: 38 92% 55%;
+    --critical-red: 0 72% 55%;
+    --telemetry-cyan: 187 85% 58%;
+    --surface-elevated: 220 25% 12%;
+    --surface-sunken: 220 25% 6%;
+
+    --sidebar-background: 220 25% 6%;
+    --sidebar-foreground: 220 14% 85%;
+    --sidebar-primary: 199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 12%;
+    --sidebar-accent-foreground: 220 14% 85%;
+    --sidebar-border: 220 20% 14%;
+    --sidebar-ring: 199 89% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight;
+  }
+}
+
+@layer utilities {
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
