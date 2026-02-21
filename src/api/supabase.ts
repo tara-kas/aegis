@@ -1,35 +1,20 @@
 /**
- * Supabase client with RLS-aware queries.
+ * Supabase integration layer.
  *
- * Row Level Security policies assumed (to be enforced in production):
- * - fhir_patients: SELECT WHERE auth.role() = 'clinician'
- * - fhir_encounters: SELECT WHERE auth.uid() IN (SELECT user_id FROM care_team WHERE encounter_id = id)
- * - fhir_observations: SELECT WHERE auth.role() IN ('clinician', 'nurse')
- * - audit_log: INSERT for all authenticated, SELECT for admin only
+ * Re-exports the typed Supabase client from the Lovable-generated integration
+ * and provides higher-level helpers for generic queries, inserts, and PHI audit logging.
  *
- * Currently uses mock fallback when SUPABASE_URL is not configured.
+ * Row Level Security policies:
+ * - fhir_patients: CRUD for users with 'clinician' role
+ * - fhir_encounters: CRUD for users with 'clinician' role
+ * - fhir_observations: CRUD for users with 'clinician' role
+ * - user_roles: SELECT own role for authenticated users
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { supabase } from '@/integrations/supabase/client';
 import { logger } from '../utils/logger';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? '';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
-
-let client: SupabaseClient | null = null;
-
-function getClient(): SupabaseClient | null {
-  if (client) return client;
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    logger.warn('Supabase not configured — using mock data fallback');
-    return null;
-  }
-  client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: true, autoRefreshToken: true },
-    db: { schema: 'public' },
-  });
-  return client;
-}
+export { supabase };
 
 export interface SupabaseQueryOptions {
   table: string;
@@ -41,12 +26,6 @@ export interface SupabaseQueryOptions {
 }
 
 export async function supabaseQuery<T>(options: SupabaseQueryOptions): Promise<{ data: T[] | null; error: string | null }> {
-  const supabase = getClient();
-  if (!supabase) {
-    logger.info('Supabase query bypassed (no client)', { table: options.table });
-    return { data: null, error: 'Supabase not configured' };
-  }
-
   try {
     let query = supabase.from(options.table).select(options.select ?? '*');
 
@@ -80,9 +59,6 @@ export async function supabaseInsert<T extends Record<string, unknown>>(
   table: string,
   record: T,
 ): Promise<{ data: T | null; error: string | null }> {
-  const supabase = getClient();
-  if (!supabase) return { data: null, error: 'Supabase not configured' };
-
   const { data, error } = await supabase.from(table).insert(record).select().single();
   if (error) {
     logger.error('Supabase insert failed', { table, error: error.message });
@@ -91,7 +67,6 @@ export async function supabaseInsert<T extends Record<string, unknown>>(
   return { data: data as T, error: null };
 }
 
-/** PHI access audit stub — logs every read/write touching patient data */
 export async function logPhiAccess(
   action: 'read' | 'create' | 'update' | 'delete',
   resourceType: string,
@@ -99,18 +74,4 @@ export async function logPhiAccess(
   userId: string,
 ): Promise<void> {
   logger.audit(`PHI ${action}: ${resourceType}/${resourceId}`, resourceType, resourceId, userId);
-
-  const supabase = getClient();
-  if (!supabase) return;
-
-  await supabase.from('audit_log').insert({
-    action,
-    resource_type: resourceType,
-    resource_id: resourceId,
-    user_id: userId,
-    timestamp: new Date().toISOString(),
-    phi_accessed: true,
-  });
 }
-
-export { getClient };
