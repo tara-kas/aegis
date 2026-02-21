@@ -23,8 +23,11 @@ import {
 // ─── Test Fixtures ───────────────────────────────────────────────────────────
 
 const mockConfig: StripeEnvironmentConfig = {
-  publishableKey: 'pk_test_mockPublishableKeyForTestingOnly123456789',
-  secretKey: 'sk_test_mockSecretKeyForTestingOnly123456789',
+    publishableKey: 'pk_test_mockPublishableKeyForTestingOnly123456789',
+    secretKey: 'sk_test_mockSecretKeyForTestingOnly123456789',
+};
+
+const validLineItems: LineItem[] = [
     {
         description: 'AWS Cloud Compute - Pre-operative Planning',
         amountCents: 50000, // $500
