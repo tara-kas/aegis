@@ -51,5 +51,8 @@ export function isLiveOnly(): boolean {
 
 /** True when VITE_DATA_MODE is explicitly set to 'live'. Falls back to false (mock) if missing. */
 export function isLiveMode(): boolean {
-    return getDataMode() === 'live';
+    return Boolean(
+      import.meta.env.VITE_SUPABASE_URL &&
+      import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+    );
 }

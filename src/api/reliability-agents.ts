@@ -29,6 +29,9 @@ export const LATENCY_THRESHOLD_MS = 200;
 /** Anomaly score above which the frame is considered safety-critical */
 export const ANOMALY_SCORE_THRESHOLD = 0.7;
 
+/** Maximum age of telemetry data before considered stale (ms) */
+export const STALE_TELEMETRY_THRESHOLD_MS = 5000;
+
 // ─── Billing Circuit-Breaker ─────────────────────────────────────────────────
 
 /**
@@ -249,8 +252,36 @@ function createAnomalyIncident(frame: KinematicFrame): Incident {
     };
 }
 
+function createStaleTelemetryIncident(frame: KinematicFrame): Incident {
+    _incidentSeq++;
+    const id = `inc-cmd-${_incidentSeq}`;
+    return {
+        id,
+        title: `Stale Telemetry Detected — Frame ${frame.frameId}`,
+        severity: 'major',
+        status: 'open',
+        source: 'system-error',
+        description:
+            `Device ${frame.deviceId} frame ${frame.frameId} is stale ` +
+            `(no updates for over ${STALE_TELEMETRY_THRESHOLD_MS}ms). ` +
+            `The billing pipeline has been automatically halted per EU AI Act Art. 9.`,
+        detectedAt: new Date().toISOString(),
+        assignee: undefined,
+        remediationSteps: [
+            'Billing pipeline halted — no new charges will be recorded',
+            'Check telemetry connection and Webots controller status',
+            'Verify Supabase Realtime subscription is active',
+            'Resume normal operations when telemetry stream restored',
+            'Post-incident review: check network connectivity',
+        ],
+        relatedAlerts: [`alert-cmd-${_alertSeq}`],
+        impactAssessment: 'Patient safety prioritised — billing suspended until telemetry restored.',
+        slackChannelId: '#aegis-incidents',
+    };
+}
+
 function createSafetyAlert(
-    kind: 'latency' | 'anomaly',
+    kind: 'latency' | 'anomaly' | 'stale',
     frame: KinematicFrame,
     detail: string,
 ): AnomalyAlert {
@@ -351,6 +382,29 @@ export function evaluateFrame(
         log.error('INCIDENT COMMANDER: Anomaly detected', {
             frameId: frame.frameId,
             anomalyScore: frame.anomalyScore,
+            incidentId: incident.id,
+        });
+
+        return { triggered: true, incident, alert, slackPayload, reason };
+    }
+
+    // ── Check 3: Stale telemetry ────────────────────────────────────────────
+    const now = new Date().getTime();
+    const frameTimestamp = new Date(frame.timestamp).getTime();
+
+    if (now - frameTimestamp > STALE_TELEMETRY_THRESHOLD_MS) {
+        const reason = `Telemetry stale — no updates for ${now - frameTimestamp}ms`;
+        haltBilling(reason);
+
+        const incident = createStaleTelemetryIncident(frame);
+        const alert = createSafetyAlert('stale', frame, reason);
+        const slackPayload = formatSlackRemediation(incident);
+
+        notifyIncident(incident);
+        notifyAlert(alert);
+
+        log.error('INCIDENT COMMANDER: Stale telemetry detected', {
+            frameId: frame.frameId,
             incidentId: incident.id,
         });
 

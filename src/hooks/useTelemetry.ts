@@ -146,115 +146,109 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
 
     if (isLiveMode()) {
       // ── LIVE MODE: Subscribe to Supabase Realtime Broadcast ────────────
-      const channel = supabase.channel('telemetry_stream');
-
-      channel
-        .on('broadcast', { event: 'telemetry' }, ({ payload }) => {
-          if (!payload) return;
-
-          const data = payload as {
-            timestamp: string;
-            joint_angles: number[];
-            joint_velocities: number[];
-            end_effector_xyz: number[];
-            applied_forces: number[];
-            anomaly_detected: boolean;
-            anomaly_reason: string | null;
-          };
-
-          const currentFrameId = liveFrameCounter.current++;
-
-          // Map Webots payload → KinematicFrame
-          const joints: JointAngle[] = (data.joint_angles ?? []).map((angle, i) => ({
-            jointId: `joint-${i}`,
-            name: ['shoulder_pan', 'shoulder_lift', 'elbow', 'wrist_1', 'wrist_2', 'wrist_3'][i] ?? `joint_${i}`,
-            angleDeg: (angle * 180) / Math.PI,
-            angleRad: angle,
-            torqueNm: (data.applied_forces ?? [])[i] ?? 0,
-            velocityRadPerSec: (data.joint_velocities ?? [])[i] ?? 0,
-          }));
-
-          const [x = 0, y = 0, z = 0] = data.end_effector_xyz ?? [];
-          const anomalyScore = data.anomaly_detected ? 0.9 : Math.random() * 0.1;
-
-          const frame: KinematicFrame = {
-            timestamp: data.timestamp ?? new Date().toISOString(),
-            frameId: currentFrameId,
-            deviceId,
-            joints,
-            endEffector: {
-              position: { x, y, z },
-              orientation: { roll: 0, pitch: 0, yaw: 0 },
-              forceN: 0,
-              gripperApertureMm: 8,
-            },
-            isAnomalous: data.anomaly_detected ?? false,
-            anomalyScore,
-          };
-
-          setLatestFrame(frame);
-
-          // Incident Commander evaluation on live frames
-          const cmdResult = evaluateFrame(frame, prevFrameTimestamp.current);
-          prevFrameTimestamp.current = frame.timestamp;
-
-          if (cmdResult.triggered) {
-            metrics.increment('incident_commander.triggered', { deviceId, reason: cmdResult.reason });
-            log.warn('Incident Commander triggered (live)', {
-              frameId: frame.frameId,
-              reason: cmdResult.reason,
-            });
-          }
-
-          if (data.anomaly_detected) {
-            metrics.increment('kinematic.anomaly_detected', { deviceId });
-            const alert: AnomalyAlert = {
-              id: `live-anomaly-${currentFrameId}-${Date.now()}`,
-              severity: 'critical',
-              title: 'Robotic Anomaly Detected (Live)',
-              message: data.anomaly_reason ?? 'Kinematic anomaly detected in live telemetry',
-              metric: 'anomaly_score',
-              currentValue: anomalyScore,
-              threshold: 0.5,
-              timestamp: data.timestamp ?? new Date().toISOString(),
-              acknowledged: false,
-              source: 'telemetry',
+      const channel = supabase
+        .channel('fhir_observations_telemetry')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'fhir_observations',
+            filter: "source=eq.robot_telemetry",
+          },
+          (payload) => {
+            const row = payload.new as {
+              id: string;
+              value_string: string;
+              validated: boolean;
+              recorded_at: string;
             };
-            setAlerts((prev) => [alert, ...prev].slice(0, maxAlerts));
 
-            // Fire-and-forget TTS warning — must never block telemetry
-            speakWarningAlert(
-              'Critical Anomaly Detected. Pausing robotic procedures and cross-referencing global data.',
-            ).catch(() => { /* swallow — TTS must not crash vitals */ });
+            let data: {
+              timestamp: string;
+              joint_angles: number[];
+              joint_velocities: number[];
+              end_effector_xyz: number[];
+              applied_forces: number[];
+              anomaly_detected: boolean;
+              anomaly_reason: string | null;
+            };
 
-            // Fire-and-forget HAI-DEF cross-reference
-            crossReferenceAnomaly(alert)
-              .then((insights) => {
-                setAlerts((prev) =>
-                  prev.map((a) =>
-                    a.id === alert.id ? { ...a, haiDefInsights: insights } : a,
-                  ),
-                );
-                log.info('HAI-DEF cross-reference complete (live)', {
-                  alertId: alert.id,
-                  confidence: insights.globalConfidenceScore,
-                  source: insights.source,
-                });
-              })
-              .catch((err) => {
-                log.warn('HAI-DEF cross-reference failed (live)', {
-                  alertId: alert.id,
-                  error: err instanceof Error ? err.message : String(err),
-                });
+            try {
+              data = typeof row.value_string === 'string'
+                ? JSON.parse(row.value_string)
+                : row.value_string;
+            } catch {
+              log.error('Failed to parse telemetry value_string', { id: row.id });
+              return;
+            }
+
+            const currentFrameId = liveFrameCounter.current++;
+
+            const joints: JointAngle[] = (data.joint_angles ?? []).map((angle, i) => ({
+              jointId: `joint-${i}`,
+              name: ['shoulder_pan', 'shoulder_lift', 'elbow', 'wrist_1', 'wrist_2', 'wrist_3'][i] ?? `joint_${i}`,
+              angleDeg: (angle * 180) / Math.PI,
+              angleRad: angle,
+              torqueNm: (data.applied_forces ?? [])[i] ?? 0,
+              velocityRadPerSec: (data.joint_velocities ?? [])[i] ?? 0,
+            }));
+
+            const [x = 0, y = 0, z = 0] = data.end_effector_xyz ?? [];
+            const anomalyScore = data.anomaly_detected ? 0.9 : Math.random() * 0.1;
+
+            const frame: KinematicFrame = {
+              timestamp: data.timestamp ?? new Date().toISOString(),
+              frameId: currentFrameId,
+              deviceId,
+              joints,
+              endEffector: {
+                position: { x, y, z },
+                orientation: { roll: 0, pitch: 0, yaw: 0 },
+                forceN: 0,
+                gripperApertureMm: 8,
+              },
+              isAnomalous: data.anomaly_detected ?? false,
+              anomalyScore,
+            };
+
+            setLatestFrame(frame);
+
+            const cmdResult = evaluateFrame(frame, prevFrameTimestamp.current);
+            prevFrameTimestamp.current = frame.timestamp;
+
+            if (cmdResult.triggered) {
+              metrics.increment('incident_commander.triggered', { deviceId, reason: cmdResult.reason });
+              log.warn('Incident Commander triggered (live)', {
+                frameId: frame.frameId,
+                reason: cmdResult.reason,
               });
+            }
+
+            if (data.anomaly_detected) {
+              metrics.increment('kinematic.anomaly_detected', { deviceId });
+              const alert: AnomalyAlert = {
+                id: `alert-live-${currentFrameId}`,
+                severity: 'critical',
+                title: 'Kinematic Anomaly Detected',
+                message: data.anomaly_reason ?? 'Robotic arm deviation detected',
+                metric: 'joint-deviation',
+                currentValue: anomalyScore,
+                threshold: 0.7,
+                timestamp: data.timestamp ?? new Date().toISOString(),
+                acknowledged: false,
+                source: 'telemetry',
+              };
+              setAlerts((prev) => [alert, ...prev].slice(0, maxAlerts));
+            }
           }
-        })
+        )
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             setConnectionStatus('connected');
             setIsStreaming(true);
-            metrics.increment('telemetry.stream_started', { deviceId, mode: 'live' });
-            log.info('Supabase Realtime Broadcast connected', { deviceId });
+            metrics.increment('telemetry.stream_started', { deviceId });
+            log.info('Supabase Postgres Realtime connected', { deviceId });
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             setConnectionStatus('error');
             log.error('Supabase Realtime subscription failed', { deviceId, status });
@@ -319,15 +313,18 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
             };
 
             // Fire-and-forget — billing must never block vital-sign rendering
-            traceObservationWorkflow({
-              workflowId: 'continuous_vitals_monitoring',
-              observation: obs,
-              billedAmount: DEFAULT_VITAL_BILLED,
-              costs: DEFAULT_VITAL_COSTS,
-              metadata: { deviceId, vitalCode: primary.code },
-            }).catch(() => {
-              // swallow — billing failures must not crash telemetry
-            });
+            // In mock mode, skip billing entirely to keep the trace store clean
+            if (!isMockOnly()) {
+              traceObservationWorkflow({
+                workflowId: 'continuous_vitals_monitoring',
+                observation: obs,
+                billedAmount: DEFAULT_VITAL_BILLED,
+                costs: DEFAULT_VITAL_COSTS,
+                metadata: { deviceId, vitalCode: primary.code },
+              }).catch(() => {
+                // swallow — billing failures must not crash telemetry
+              });
+            }
           }
 
           return updated;
