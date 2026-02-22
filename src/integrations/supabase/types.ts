@@ -33,6 +33,7 @@ export type Database = {
           service_provider: string | null
           status: string
           subject_id: string
+          surgical_session_id: string
           type_code: string | null
           type_display: string | null
           type_system: string | null
@@ -56,6 +57,7 @@ export type Database = {
           service_provider?: string | null
           status: string
           subject_id: string
+          surgical_session_id: string
           type_code?: string | null
           type_display?: string | null
           type_system?: string | null
@@ -79,6 +81,7 @@ export type Database = {
           service_provider?: string | null
           status?: string
           subject_id?: string
+          surgical_session_id?: string
           type_code?: string | null
           type_display?: string | null
           type_system?: string | null
@@ -117,6 +120,7 @@ export type Database = {
           resource_type: string
           status: string
           subject_id: string
+          surgical_session_id: string
           updated_at: string
           value_quantity_code: string | null
           value_quantity_system: string | null
@@ -146,6 +150,7 @@ export type Database = {
           resource_type?: string
           status: string
           subject_id: string
+          surgical_session_id: string
           updated_at?: string
           value_quantity_code?: string | null
           value_quantity_system?: string | null
@@ -175,6 +180,7 @@ export type Database = {
           resource_type?: string
           status?: string
           subject_id?: string
+          surgical_session_id?: string
           updated_at?: string
           value_quantity_code?: string | null
           value_quantity_system?: string | null

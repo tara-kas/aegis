@@ -45,7 +45,7 @@ export function PatientViewer({ patient, encounter, observations }: PatientViewe
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span className="flex items-center gap-1"><User className="w-3 h-3" />{patient.gender}, {age}y</span>
               <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />DOB: {patient.birthDate}</span>
-              <span className="font-mono text-primary">{mrn}</span>
+              <span className="font-mono text-primary">MRN: {mrn}</span>
             </div>
           </div>
           {patient.active && <Badge className="bg-vital-green text-vital-green-foreground">Active</Badge>}

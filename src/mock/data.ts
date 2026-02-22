@@ -11,13 +11,46 @@ import type { VitalSign, AnomalyAlert, KinematicFrame, JointAngle } from '../typ
 import type { MarginData, SolanaTransaction, ACPStatus, SharedPaymentToken, SubscriptionSummary, RevenueDataPoint, PaidAiTrace } from '../types/financial';
 import type { ComplianceItem, Incident, AuditEntry } from '../types/compliance';
 
-// ─── FHIR Patients (Synthea-style) ──────────────────────────────────────────
+// ─── Number of Patients Seed ────────────────────────────────────────────────
+const TOTAL_GENERATED_PATIENTS = Math.floor(Math.random() * 21) + 20; // 20 to 40
+
+// ─── FHIR Patients Factory ────────────────────────────────────────────────
+function generateFakePatients(count: number): FhirPatient[] {
+  const firstNames = ['James', 'Mary', 'John', 'Patricia', 'Robert', 'Jennifer', 'Michael', 'Linda', 'William', 'Elizabeth', 'David', 'Barbara', 'Richard', 'Susan', 'Joseph', 'Jessica', 'Thomas', 'Sarah', 'Charles', 'Karen'];
+  const lastNames = ['Smith', 'Johnson', 'Williams', 'Jones', 'Brown', 'Davis', 'Miller', 'Wilson', 'Moore', 'Taylor', 'Anderson', 'Thomas', 'Jackson', 'White', 'Harris', 'Martin', 'Thompson', 'Garcia', 'Martinez', 'Robinson'];
+
+  return Array.from({ length: count }).map((_, i) => {
+    const id = `patient-${100 + i}`;
+    const fn = firstNames[Math.floor(Math.random() * firstNames.length)];
+    const ln = lastNames[Math.floor(Math.random() * lastNames.length)];
+    const birthYear = 1940 + Math.floor(Math.random() * 60);
+    const birthMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
+    const birthDay = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+    const gender = ['male', 'female', 'other'][Math.floor(Math.random() * 3)] as 'male' | 'female' | 'other';
+    const active = Math.random() > 0.2; // 80% chance to be active
+
+    return {
+      resourceType: 'Patient',
+      id,
+      meta: { versionId: '1', lastUpdated: new Date().toISOString() },
+      identifier: [
+        { system: 'urn:oid:2.16.840.1.113883.2.1.4.1', value: `NHS-${Math.floor(Math.random() * 10000000000)}`, use: 'official' },
+        { system: 'urn:aegis:mrn', value: `MRN-2026-${String(100 + i).padStart(4, '0')}`, use: 'usual' },
+      ],
+      active,
+      name: [{ use: 'official', family: ln, given: [fn] }],
+      gender,
+      birthDate: `${birthYear}-${birthMonth}-${birthDay}`,
+      address: [{ use: 'home', line: [`${Math.floor(Math.random() * 100) + 1} Fake St`], city: 'London', postalCode: 'W1', country: 'GB' }],
+    };
+  });
+}
 
 export const mockPatients: FhirPatient[] = [
   {
     resourceType: 'Patient',
     id: 'patient-001',
-    meta: { versionId: '3', lastUpdated: '2026-02-21T08:00:00Z' },
+    meta: { versionId: '3', lastUpdated: new Date().toISOString() },
     identifier: [
       { system: 'urn:oid:2.16.840.1.113883.2.1.4.1', value: 'NHS-9876543210', use: 'official' },
       { system: 'urn:aegis:mrn', value: 'MRN-2026-0001', use: 'usual' },
@@ -32,7 +65,7 @@ export const mockPatients: FhirPatient[] = [
   {
     resourceType: 'Patient',
     id: 'patient-002',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T07:30:00Z' },
+    meta: { versionId: '1', lastUpdated: new Date().toISOString() },
     identifier: [
       { system: 'urn:oid:2.16.840.1.113883.2.1.4.1', value: 'NHS-1234567890', use: 'official' },
       { system: 'urn:aegis:mrn', value: 'MRN-2026-0002', use: 'usual' },
@@ -46,7 +79,7 @@ export const mockPatients: FhirPatient[] = [
   {
     resourceType: 'Patient',
     id: 'patient-003',
-    meta: { versionId: '2', lastUpdated: '2026-02-21T06:15:00Z' },
+    meta: { versionId: '2', lastUpdated: new Date().toISOString() },
     identifier: [
       { system: 'urn:oid:2.16.840.1.113883.2.1.4.1', value: 'NHS-5556667778', use: 'official' },
       { system: 'urn:aegis:mrn', value: 'MRN-2026-0003', use: 'usual' },
@@ -57,136 +90,188 @@ export const mockPatients: FhirPatient[] = [
     birthDate: '1972-07-05',
     address: [{ use: 'home', line: ['Friedrichstraße 43'], city: 'Berlin', postalCode: '10117', country: 'DE' }],
   },
+  ...generateFakePatients(TOTAL_GENERATED_PATIENTS)
 ];
 
-// ─── FHIR Encounters ────────────────────────────────────────────────────────
+// ─── FHIR Encounters Factory ────────────────────────────────────────────────
+function generateFakeEncounters(patients: FhirPatient[]): FhirEncounter[] {
+  // Filter out the first 3 since they are statically mapped below
+  const generatedPatients = patients.slice(3);
+  const encounterTypes = [
+    { code: '387713003', display: 'Surgical procedure', text: 'Outpatient consult' },
+    { code: '265764009', display: 'Renal transplant', text: 'Post-op follow-up' },
+    { code: '305354007', display: 'Admission to surgical department', text: 'Pre-admission screening' }
+  ];
+
+  return generatedPatients.map((p, i) => {
+    const isFinished = Math.random() > 0.3; // 70% finished, 30% planned
+    const typeObj = encounterTypes[Math.floor(Math.random() * encounterTypes.length)];
+    const id = `encounter-${100 + i}`;
+
+    return {
+      resourceType: 'Encounter',
+      id,
+      meta: { versionId: '1', lastUpdated: new Date(Date.now() - Math.random() * 86400 * 1000).toISOString() },
+      status: isFinished ? 'finished' : 'planned',
+      class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB', display: 'ambulatory' },
+      type: [{ coding: [{ system: 'http://snomed.info/sct', code: typeObj.code, display: typeObj.display }], text: typeObj.text }],
+      subject: { reference: `Patient/${p.id}`, display: `${p.name[0].given[0]} ${p.name[0].family}` },
+      period: {
+        start: new Date(Date.now() - (isFinished ? 86400 * 1000 * Math.random() : -86400 * 1000 * Math.random())).toISOString()
+      },
+    };
+  });
+}
 
 export const mockEncounters: FhirEncounter[] = [
   {
     resourceType: 'Encounter',
     id: 'encounter-001',
-    meta: { versionId: '2', lastUpdated: '2026-02-21T09:00:00Z' },
+    meta: { versionId: '2', lastUpdated: new Date(Date.now() - 25 * 60000).toISOString() },
     status: 'in-progress',
     class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'IMP', display: 'inpatient encounter' },
     type: [{ coding: [{ system: 'http://snomed.info/sct', code: '305354007', display: 'Admission to surgical department' }], text: 'Robotic-assisted laparoscopic cholecystectomy' }],
     subject: { reference: 'Patient/patient-001', display: 'Ms. Yuki A. Nakamura' },
     participant: [{ individual: { reference: 'Practitioner/surgeon-001', display: 'Dr. Elena Vasquez' } }],
-    period: { start: '2026-02-21T07:30:00Z' },
+    period: { start: new Date(Date.now() - 35 * 60000).toISOString() },
     reasonCode: [{ coding: [{ system: 'http://snomed.info/sct', code: '235919008', display: 'Cholecystitis' }], text: 'Acute cholecystitis' }],
     location: [{ location: { reference: 'Location/or-3', display: 'OR Suite 3 — Robotic Surgery' } }],
   },
   {
     resourceType: 'Encounter',
     id: 'encounter-002',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T08:00:00Z' },
-    status: 'planned',
+    meta: { versionId: '1', lastUpdated: new Date().toISOString() },
+    status: 'in-progress',
     class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'IMP', display: 'inpatient encounter' },
     type: [{ coding: [{ system: 'http://snomed.info/sct', code: '387713003', display: 'Surgical procedure' }], text: 'Robotic-assisted prostatectomy' }],
     subject: { reference: 'Patient/patient-002', display: 'Declan M. O\'Brien' },
-    period: { start: '2026-02-21T13:00:00Z' },
+    period: { start: new Date(Date.now() - 120 * 60000).toISOString() },
     reasonCode: [{ coding: [{ system: 'http://snomed.info/sct', code: '399068003', display: 'Malignant neoplasm of prostate' }], text: 'Prostate carcinoma — Gleason 3+4' }],
+    location: [{ location: { reference: 'Location/or-2', display: 'OR Suite 2 — Minimally Invasive' } }],
   },
   {
     resourceType: 'Encounter',
     id: 'encounter-003',
-    meta: { versionId: '1', lastUpdated: '2026-02-20T16:00:00Z' },
+    meta: { versionId: '1', lastUpdated: new Date(Date.now() - 86400 * 1000).toISOString() },
     status: 'finished',
     class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'IMP', display: 'inpatient encounter' },
     type: [{ coding: [{ system: 'http://snomed.info/sct', code: '265764009', display: 'Renal transplant' }], text: 'Robotic-assisted partial nephrectomy' }],
     subject: { reference: 'Patient/patient-003', display: 'Sofie Müller' },
-    period: { start: '2026-02-20T09:00:00Z', end: '2026-02-20T14:30:00Z' },
+    period: { start: new Date(Date.now() - 86400 * 1000 - 14400 * 1000).toISOString(), end: new Date(Date.now() - 86400 * 1000).toISOString() },
   },
+  ...generateFakeEncounters(mockPatients)
 ];
+
+// ─── FHIR Observations Factory ──────────────────────────────────────────────
+function generateObservationsForActiveEncounters(encounters: FhirEncounter[]): FhirObservation[] {
+  const activeEncounters = encounters.filter(e => e.status === 'in-progress');
+  const observations: FhirObservation[] = [];
+
+  let obsCounter = 100;
+  activeEncounters.forEach(enc => {
+    const patientRef = enc.subject.reference;
+    const baseDate = new Date().toISOString();
+
+    // Heart Rate
+    observations.push({
+      resourceType: 'Observation',
+      id: `obs-hr-gen-${obsCounter++}`,
+      meta: { versionId: '1', lastUpdated: baseDate },
+      status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
+      code: { coding: [{ system: 'http://loinc.org', code: '8867-4', display: 'Heart rate' }], text: 'Heart Rate' },
+      subject: { reference: patientRef },
+      encounter: { reference: `Encounter/${enc.id}` },
+      effectiveDateTime: baseDate,
+      valueQuantity: { value: 65 + Math.floor(Math.random() * 30), unit: 'beats/minute', system: 'http://unitsofmeasure.org', code: '/min' },
+      referenceRange: [{ low: { value: 60, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' }, high: { value: 100, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' } }],
+    });
+
+    // SpO2
+    observations.push({
+      resourceType: 'Observation',
+      id: `obs-spo2-gen-${obsCounter++}`,
+      meta: { versionId: '1', lastUpdated: baseDate },
+      status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
+      code: { coding: [{ system: 'http://loinc.org', code: '2708-6', display: 'Oxygen saturation in Arterial blood by Pulse oximetry' }], text: 'SpO₂' },
+      subject: { reference: patientRef },
+      encounter: { reference: `Encounter/${enc.id}` },
+      effectiveDateTime: baseDate,
+      valueQuantity: { value: 95 + Math.floor(Math.random() * 5), unit: '%', system: 'http://unitsofmeasure.org', code: '%' },
+      referenceRange: [{ low: { value: 95, unit: '%', system: 'http://unitsofmeasure.org', code: '%' }, high: { value: 100, unit: '%', system: 'http://unitsofmeasure.org', code: '%' } }],
+    });
+
+    // Blood Pressure Panel
+    observations.push({
+      resourceType: 'Observation',
+      id: `obs-bp-gen-${obsCounter++}`,
+      meta: { versionId: '1', lastUpdated: baseDate },
+      status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
+      code: { coding: [{ system: 'http://loinc.org', code: '85354-9', display: 'Blood pressure panel' }], text: 'Blood Pressure' },
+      subject: { reference: patientRef },
+      encounter: { reference: `Encounter/${enc.id}` },
+      effectiveDateTime: baseDate,
+      component: [
+        { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }] }, valueQuantity: { value: 110 + Math.floor(Math.random() * 20), unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
+        { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }] }, valueQuantity: { value: 70 + Math.floor(Math.random() * 15), unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
+      ],
+    });
+
+    // Temperature
+    observations.push({
+      resourceType: 'Observation',
+      id: `obs-temp-gen-${obsCounter++}`,
+      meta: { versionId: '1', lastUpdated: baseDate },
+      status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
+      code: { coding: [{ system: 'http://loinc.org', code: '8310-5', display: 'Body temperature' }], text: 'Temperature' },
+      subject: { reference: patientRef },
+      encounter: { reference: `Encounter/${enc.id}` },
+      effectiveDateTime: baseDate,
+      valueQuantity: { value: 36.5 + Math.floor(Math.random() * 10) / 10, unit: 'Cel', system: 'http://unitsofmeasure.org', code: 'Cel' },
+      referenceRange: [{ low: { value: 36.1, unit: 'Cel', system: 'http://unitsofmeasure.org', code: 'Cel' }, high: { value: 37.2, unit: 'Cel', system: 'http://unitsofmeasure.org', code: 'Cel' } }],
+    });
+
+    // Respiratory Rate
+    observations.push({
+      resourceType: 'Observation',
+      id: `obs-resp-gen-${obsCounter++}`,
+      meta: { versionId: '1', lastUpdated: baseDate },
+      status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
+      code: { coding: [{ system: 'http://loinc.org', code: '9279-1', display: 'Respiratory rate' }], text: 'Respiratory Rate' },
+      subject: { reference: patientRef },
+      encounter: { reference: `Encounter/${enc.id}` },
+      effectiveDateTime: baseDate,
+      valueQuantity: { value: 12 + Math.floor(Math.random() * 8), unit: 'breaths/minute', system: 'http://unitsofmeasure.org', code: '/min' },
+      referenceRange: [{ low: { value: 12, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' }, high: { value: 20, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' } }],
+    });
+
+    // EtCO2
+    observations.push({
+      resourceType: 'Observation',
+      id: `obs-etco2-gen-${obsCounter++}`,
+      meta: { versionId: '1', lastUpdated: baseDate },
+      status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
+      code: { coding: [{ system: 'http://loinc.org', code: '19889-5', display: 'End tidal CO2' }], text: 'EtCO₂' },
+      subject: { reference: patientRef },
+      encounter: { reference: `Encounter/${enc.id}` },
+      effectiveDateTime: baseDate,
+      valueQuantity: { value: 35 + Math.floor(Math.random() * 10), unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
+      referenceRange: [{ low: { value: 35, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' }, high: { value: 45, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } }],
+    });
+  });
+
+  return observations;
+}
 
 // ─── FHIR Observations (Vital Signs — MIMIC-IV patterns) ────────────────────
 
 export const mockObservations: FhirObservation[] = [
-  {
-    resourceType: 'Observation',
-    id: 'obs-hr-001',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T09:15:00Z' },
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8867-4', display: 'Heart rate' }], text: 'Heart Rate' },
-    subject: { reference: 'Patient/patient-001' },
-    encounter: { reference: 'Encounter/encounter-001' },
-    effectiveDateTime: '2026-02-21T09:15:00Z',
-    valueQuantity: { value: 72, unit: 'beats/minute', system: 'http://unitsofmeasure.org', code: '/min' },
-    device: { reference: 'Device/monitor-001' },
-    referenceRange: [{ low: { value: 60, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' }, high: { value: 100, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' } }],
-  },
-  {
-    resourceType: 'Observation',
-    id: 'obs-spo2-001',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T09:15:00Z' },
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '2708-6', display: 'Oxygen saturation in Arterial blood by Pulse oximetry' }], text: 'SpO₂' },
-    subject: { reference: 'Patient/patient-001' },
-    encounter: { reference: 'Encounter/encounter-001' },
-    effectiveDateTime: '2026-02-21T09:15:00Z',
-    valueQuantity: { value: 98, unit: '%', system: 'http://unitsofmeasure.org', code: '%' },
-    device: { reference: 'Device/monitor-001' },
-    referenceRange: [{ low: { value: 95, unit: '%', system: 'http://unitsofmeasure.org', code: '%' }, high: { value: 100, unit: '%', system: 'http://unitsofmeasure.org', code: '%' } }],
-  },
-  {
-    resourceType: 'Observation',
-    id: 'obs-bp-001',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T09:15:00Z' },
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '85354-9', display: 'Blood pressure panel' }], text: 'Blood Pressure' },
-    subject: { reference: 'Patient/patient-001' },
-    encounter: { reference: 'Encounter/encounter-001' },
-    effectiveDateTime: '2026-02-21T09:15:00Z',
-    component: [
-      { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }] }, valueQuantity: { value: 118, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
-      { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }] }, valueQuantity: { value: 76, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
-    ],
-    device: { reference: 'Device/monitor-001' },
-  },
-  {
-    resourceType: 'Observation',
-    id: 'obs-etco2-001',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T09:15:00Z' },
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '19889-5', display: 'Carbon dioxide [Partial pressure] in Exhaled gas' }], text: 'EtCO₂' },
-    subject: { reference: 'Patient/patient-001' },
-    encounter: { reference: 'Encounter/encounter-001' },
-    effectiveDateTime: '2026-02-21T09:15:00Z',
-    valueQuantity: { value: 37, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' },
-    device: { reference: 'Device/monitor-001' },
-    referenceRange: [{ low: { value: 35, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' }, high: { value: 45, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } }],
-  },
-  {
-    resourceType: 'Observation',
-    id: 'obs-rr-001',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T09:15:00Z' },
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '9279-1', display: 'Respiratory rate' }], text: 'Respiratory Rate' },
-    subject: { reference: 'Patient/patient-001' },
-    encounter: { reference: 'Encounter/encounter-001' },
-    effectiveDateTime: '2026-02-21T09:15:00Z',
-    valueQuantity: { value: 14, unit: 'breaths/minute', system: 'http://unitsofmeasure.org', code: '/min' },
-    device: { reference: 'Device/monitor-001' },
-    referenceRange: [{ low: { value: 12, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' }, high: { value: 20, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' } }],
-  },
-  {
-    resourceType: 'Observation',
-    id: 'obs-temp-001',
-    meta: { versionId: '1', lastUpdated: '2026-02-21T09:15:00Z' },
-    status: 'final',
-    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
-    code: { coding: [{ system: 'http://loinc.org', code: '8310-5', display: 'Body temperature' }], text: 'Temperature' },
-    subject: { reference: 'Patient/patient-001' },
-    encounter: { reference: 'Encounter/encounter-001' },
-    effectiveDateTime: '2026-02-21T09:15:00Z',
-    valueQuantity: { value: 36.7, unit: '°C', system: 'http://unitsofmeasure.org', code: 'Cel' },
-    device: { reference: 'Device/monitor-001' },
-    referenceRange: [{ low: { value: 36.1, unit: '°C', system: 'http://unitsofmeasure.org', code: 'Cel' }, high: { value: 37.2, unit: '°C', system: 'http://unitsofmeasure.org', code: 'Cel' } }],
-  },
+  ...generateObservationsForActiveEncounters(mockEncounters)
 ];
 
 // ─── FHIR Devices ────────────────────────────────────────────────────────────
@@ -309,15 +394,8 @@ function makeJoints(frameId: number): JointAngle[] {
 export function generateKinematicFrame(frameId: number): KinematicFrame {
   const anomalyScore = frameId === 150 ? 0.87 : Math.random() * 0.15;
 
-  // ── Failsafe simulation: inject a 500 ms latency spike at frame 75 ─────
-  // The Incident Commander uses consecutive-frame timestamps to detect
-  // latency breaches.  By pushing frame 75's timestamp 500 ms into the
-  // future relative to its natural cadence, we guarantee a latency > 200 ms
-  // that the commander MUST intercept.
-  const latencyInjectionMs = frameId === 75 ? 500 : 0;
-
   return {
-    timestamp: new Date(Date.now() + frameId * 100 + latencyInjectionMs).toISOString(),
+    timestamp: new Date(Date.now() + frameId * 100).toISOString(),
     frameId,
     deviceId: 'robot-arm-001',
     joints: makeJoints(frameId),
@@ -464,18 +542,18 @@ export const mockPaidAiTraces: PaidAiTrace[] = [
 // ─── Compliance: EU AI Act Checklist ────────────────────────────────────────
 
 export const mockComplianceItems: ComplianceItem[] = [
-  { id: 'comp-001', category: 'transparency', requirement: 'AI System Disclosure', description: 'Clinical users must be explicitly informed they are interacting with an AI system (Art. 52)', status: 'pass', evidence: 'Banner displayed on all AI-generated outputs', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 52(1)' },
-  { id: 'comp-002', category: 'human-oversight', requirement: 'Human-in-the-Loop Override', description: 'Human oversight mechanisms must allow intervention at any point (Annex IV §2)', status: 'pass', evidence: 'Emergency stop and override controls active on dashboard', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Annex IV §2' },
-  { id: 'comp-003', category: 'technical-documentation', requirement: 'Technical Documentation (Annex VII)', description: 'Comprehensive docs covering architecture, monitoring, performance metrics, risk management', status: 'pending', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Annex VII' },
-  { id: 'comp-004', category: 'risk-management', requirement: 'Risk Management System', description: 'Continuous risk identification, analysis, and mitigation for high-risk AI (Art. 9)', status: 'pass', evidence: 'incident.io adaptive agents monitoring continuously', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 9' },
-  { id: 'comp-005', category: 'data-governance', requirement: 'Training Data Governance', description: 'Data quality criteria, bias detection, and representativeness requirements (Art. 10)', status: 'pass', evidence: 'Synthea synthetic data with documented generation parameters', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 10' },
-  { id: 'comp-006', category: 'bias-monitoring', requirement: 'Bias Detection & Monitoring', description: 'Continuous monitoring for output bias and demographic fairness', status: 'pending', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'medium', articleReference: 'Art. 10(2)(f)' },
-  { id: 'comp-007', category: 'cybersecurity', requirement: 'Cybersecurity Measures', description: 'Protection against adversarial attacks, data poisoning, and model manipulation (DORA Art. 6)', status: 'pass', evidence: 'OpenShift AI namespace isolation, RBAC, encrypted etcd', lastChecked: '2026-02-21T06:00:00Z', regulation: 'dora', riskLevel: 'high', articleReference: 'DORA Art. 6' },
-  { id: 'comp-008', category: 'incident-reporting', requirement: 'Incident Reporting Framework', description: 'Structured incident detection, classification, and reporting per DORA Art. 19', status: 'pass', evidence: 'incident.io SLA Guardian and Incident Commander active', lastChecked: '2026-02-21T06:00:00Z', regulation: 'dora', riskLevel: 'high', articleReference: 'DORA Art. 19' },
-  { id: 'comp-009', category: 'third-party-management', requirement: 'ICT Third-Party Risk Management', description: 'All vendor dependencies mapped and monitored (DORA Art. 28)', status: 'pass', evidence: 'SBOM generated; Crusoe, ElevenLabs, Stripe, Solana mapped', lastChecked: '2026-02-21T06:00:00Z', regulation: 'dora', riskLevel: 'medium', articleReference: 'DORA Art. 28' },
-  { id: 'comp-010', category: 'model-governance', requirement: 'Model Registry & Versioning', description: 'Only validated, compliant models deployed to clinical endpoints (OpenShift AI)', status: 'pass', evidence: 'Red Hat OpenShift AI model registry with full traceability', lastChecked: '2026-02-21T06:00:00Z', regulation: 'mdr', riskLevel: 'high' },
-  { id: 'comp-011', category: 'transparency', requirement: 'GPAI Systemic Risk Obligations', description: 'Adversarial testing, risk mitigation for general-purpose AI with systemic risk (Art. 55)', status: 'pending', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 55' },
-  { id: 'comp-012', category: 'data-governance', requirement: 'GDPR Data Protection', description: 'No real PHI used; synthetic data only; data minimisation principles applied', status: 'pass', evidence: 'All data generated via Synthea; no real patient records', lastChecked: '2026-02-21T06:00:00Z', regulation: 'gdpr', riskLevel: 'high' },
+  { id: 'comp-001', category: 'transparency', requirement: 'AI System Disclosure', description: 'Clinical users must be explicitly informed they are interacting with an AI system (Art. 52)', status: 'pass', evidence: 'Banner displayed on all AI-generated outputs', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 52(1)', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689' },
+  { id: 'comp-002', category: 'human-oversight', requirement: 'Human-in-the-Loop Override', description: 'Human oversight mechanisms must allow intervention at any point (Annex IV §2)', status: 'pass', evidence: 'Emergency stop and override controls active on dashboard', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Annex IV §2', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689' },
+  { id: 'comp-003', category: 'technical-documentation', requirement: 'Technical Documentation (Annex VII)', description: 'Comprehensive docs covering architecture, monitoring, performance metrics, risk management', status: 'pending', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Annex VII', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689' },
+  { id: 'comp-004', category: 'risk-management', requirement: 'Risk Management System', description: 'Continuous risk identification, analysis, and mitigation for high-risk AI (Art. 9)', status: 'pass', evidence: 'incident.io adaptive agents monitoring continuously', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 9', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689' },
+  { id: 'comp-005', category: 'data-governance', requirement: 'Training Data Governance', description: 'Data quality criteria, bias detection, and representativeness requirements (Art. 10)', status: 'pass', evidence: 'Synthea synthetic data with documented generation parameters', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 10', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689' },
+  { id: 'comp-006', category: 'bias-monitoring', requirement: 'Bias Detection & Monitoring', description: 'Continuous monitoring for output bias and demographic fairness', status: 'pending', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'medium', articleReference: 'Art. 10(2)(f)', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689' },
+  { id: 'comp-007', category: 'cybersecurity', requirement: 'Cybersecurity Measures', description: 'Protection against adversarial attacks, data poisoning, and model manipulation (DORA Art. 6)', status: 'pass', evidence: 'OpenShift AI namespace isolation, RBAC, encrypted etcd', lastChecked: '2026-02-21T06:00:00Z', regulation: 'dora', riskLevel: 'high', articleReference: 'DORA Art. 6', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32022R2554' },
+  { id: 'comp-008', category: 'incident-reporting', requirement: 'Incident Reporting Framework', description: 'Structured incident detection, classification, and reporting per DORA Art. 19', status: 'pass', evidence: 'incident.io SLA Guardian and Incident Commander active', lastChecked: '2026-02-21T06:00:00Z', regulation: 'dora', riskLevel: 'high', articleReference: 'DORA Art. 19', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32022R2554' },
+  { id: 'comp-009', category: 'third-party-management', requirement: 'ICT Third-Party Risk Management', description: 'All vendor dependencies mapped and monitored (DORA Art. 28)', status: 'pass', evidence: 'SBOM generated; Crusoe, ElevenLabs, Stripe, Solana mapped', lastChecked: '2026-02-21T06:00:00Z', regulation: 'dora', riskLevel: 'medium', articleReference: 'DORA Art. 28', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32022R2554' },
+  { id: 'comp-010', category: 'model-governance', requirement: 'Model Registry & Versioning', description: 'Only validated, compliant models deployed to clinical endpoints (OpenShift AI)', status: 'pass', evidence: 'Red Hat OpenShift AI model registry with full traceability', lastChecked: '2026-02-21T06:00:00Z', regulation: 'mdr', riskLevel: 'high', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32017R0745' },
+  { id: 'comp-011', category: 'transparency', requirement: 'GPAI Systemic Risk Obligations', description: 'Adversarial testing, risk mitigation for general-purpose AI with systemic risk (Art. 55)', status: 'pending', lastChecked: '2026-02-21T06:00:00Z', regulation: 'eu-ai-act', riskLevel: 'high', articleReference: 'Art. 55', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689' },
+  { id: 'comp-012', category: 'data-governance', requirement: 'GDPR Data Protection', description: 'No real PHI used; synthetic data only; data minimisation principles applied', status: 'pass', evidence: 'All data generated via Synthea; no real patient records', lastChecked: '2026-02-21T06:00:00Z', regulation: 'gdpr', riskLevel: 'high', externalLink: 'https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679' },
 ];
 
 // ─── Compliance: incident.io Incidents ──────────────────────────────────────
@@ -488,7 +566,7 @@ export const mockIncidents: Incident[] = [
     status: 'investigating',
     source: 'kinematic-anomaly',
     description: 'Webots robotic arm joint 4 deviated 12.3° from planned surgical trajectory during cholecystectomy. Robotic arm automatically paused. Anomaly score: 0.87.',
-    detectedAt: '2026-02-21T09:10:00Z',
+    detectedAt: new Date(Date.now() - 2 * 60000).toISOString(),
     assignee: 'Dr. Elena Vasquez',
     remediationSteps: [
       'Robotic arm halted — emergency stop engaged',
@@ -500,6 +578,7 @@ export const mockIncidents: Incident[] = [
     relatedAlerts: ['alert-002'],
     impactAssessment: 'Patient safety preserved — arm halted within 50ms. No tissue contact during deviation.',
     slackChannelId: '#aegis-incidents',
+    externalLink: 'https://app.incident.io/aegis-health/incidents/101',
   },
   {
     id: 'inc-002',
@@ -508,14 +587,15 @@ export const mockIncidents: Incident[] = [
     status: 'resolved',
     source: 'api-latency',
     description: 'Crusoe Cloud DeepSeek-R1 endpoint latency spiked to 340ms (target <200ms). Likely due to KV cache miss. Resolved after 2 retries.',
-    detectedAt: '2026-02-21T09:08:00Z',
-    resolvedAt: '2026-02-21T09:08:15Z',
+    detectedAt: new Date(Date.now() - 17 * 60000).toISOString(),
+    resolvedAt: new Date(Date.now() - 16 * 60000).toISOString(),
     remediationSteps: [
       'Automatic retry with exponential backoff triggered',
       'Request routed to secondary inference node',
       'Latency returned to 45ms after MemoryAlloy cache re-warmed',
     ],
     relatedAlerts: ['alert-003'],
+    externalLink: 'https://aegis-health.pagerduty.com/incidents/Q0223A4D',
   },
   {
     id: 'inc-003',
@@ -524,25 +604,26 @@ export const mockIncidents: Incident[] = [
     status: 'closed',
     source: 'model-drift',
     description: 'Scribe v2 transcription confidence dropped below 92% threshold during surgeon vocal note. Background noise in OR identified as cause.',
-    detectedAt: '2026-02-21T08:45:00Z',
-    resolvedAt: '2026-02-21T08:46:00Z',
+    detectedAt: new Date(Date.now() - 45 * 60000).toISOString(),
+    resolvedAt: new Date(Date.now() - 42 * 60000).toISOString(),
     remediationSteps: [
       'Noise gate threshold increased from -40dB to -35dB',
       'Transcription re-attempted with filtered audio',
       'Confidence restored to 97.2%',
     ],
     relatedAlerts: [],
+    externalLink: 'https://app.incident.io/aegis-health/incidents/102',
   },
 ];
 
 // ─── Compliance: Audit Trail ────────────────────────────────────────────────
 
 export const mockAuditEntries: AuditEntry[] = [
-  { id: 'audit-001', timestamp: '2026-02-21T09:15:00Z', action: 'read', resourceType: 'Patient', resourceId: 'patient-001', userId: 'surgeon-001', userRole: 'clinician', ipAddress: '10.0.1.42', outcome: 'success', phiAccessed: true, details: 'Viewed patient demographics for surgical preparation' },
-  { id: 'audit-002', timestamp: '2026-02-21T09:14:00Z', action: 'read', resourceType: 'Observation', resourceId: 'obs-hr-001', userId: 'surgeon-001', userRole: 'clinician', ipAddress: '10.0.1.42', outcome: 'success', phiAccessed: true },
-  { id: 'audit-003', timestamp: '2026-02-21T09:10:00Z', action: 'create', resourceType: 'Observation', resourceId: 'obs-kinematic-150', userId: 'aegis-agent', userRole: 'system', ipAddress: '10.0.1.1', outcome: 'success', phiAccessed: false, details: 'Anomaly observation auto-generated by telemetry pipeline' },
-  { id: 'audit-004', timestamp: '2026-02-21T09:05:00Z', action: 'access', resourceType: 'Encounter', resourceId: 'encounter-001', userId: 'nurse-003', userRole: 'nurse', ipAddress: '10.0.1.88', outcome: 'success', phiAccessed: true },
-  { id: 'audit-005', timestamp: '2026-02-21T09:00:00Z', action: 'export', resourceType: 'Patient', resourceId: 'patient-001', userId: 'admin-001', userRole: 'admin', ipAddress: '10.0.1.10', outcome: 'denied', phiAccessed: false, details: 'Export blocked — insufficient permissions for PHI bulk export' },
+  { id: 'audit-001', timestamp: new Date(Date.now() - 1 * 60000).toISOString(), action: 'read', resourceType: 'Patient', resourceId: 'patient-001', userId: 'surgeon-001', userRole: 'clinician', ipAddress: '10.0.1.42', outcome: 'success', phiAccessed: true, details: 'Viewed patient demographics for surgical preparation' },
+  { id: 'audit-002', timestamp: new Date(Date.now() - 3 * 60000).toISOString(), action: 'read', resourceType: 'Observation', resourceId: 'obs-hr-001', userId: 'surgeon-001', userRole: 'clinician', ipAddress: '10.0.1.42', outcome: 'success', phiAccessed: true },
+  { id: 'audit-003', timestamp: new Date(Date.now() - 6 * 60000).toISOString(), action: 'create', resourceType: 'Observation', resourceId: 'obs-kinematic-150', userId: 'aegis-agent', userRole: 'system', ipAddress: '10.0.1.1', outcome: 'success', phiAccessed: false, details: 'Anomaly observation auto-generated by telemetry pipeline' },
+  { id: 'audit-004', timestamp: new Date(Date.now() - 14 * 60000).toISOString(), action: 'access', resourceType: 'Encounter', resourceId: 'encounter-001', userId: 'nurse-003', userRole: 'nurse', ipAddress: '10.0.1.88', outcome: 'success', phiAccessed: true },
+  { id: 'audit-005', timestamp: new Date(Date.now() - 30 * 60000).toISOString(), action: 'export', resourceType: 'Patient', resourceId: 'patient-001', userId: 'admin-001', userRole: 'admin', ipAddress: '10.0.1.10', outcome: 'denied', phiAccessed: false, details: 'Export blocked — insufficient permissions for PHI bulk export' },
 ];
 
 // ─── Telemetry Simulation Helpers ───────────────────────────────────────────

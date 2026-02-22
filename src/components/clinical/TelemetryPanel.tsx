@@ -1,5 +1,5 @@
 import type { KinematicFrame, ConnectionStatus } from '../../types/telemetry';
-import { Radio, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Radio, Wifi, WifiOff, AlertTriangle, Info } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getRoboticDevice } from '@/lib/device-registry';
 
@@ -60,15 +60,27 @@ export function TelemetryPanel({ deviceId, latestFrame, connectionStatus }: Tele
               <p className="text-lg font-mono text-foreground">#{latestFrame.frameId}</p>
             </div>
             <div className="rounded bg-muted p-2">
-              <span className="text-xs text-muted-foreground">Anomaly Score</span>
-              <p className={`text-lg font-mono ${latestFrame.anomalyScore > 0.7 ? 'text-destructive' : latestFrame.anomalyScore > 0.3 ? 'text-alert-amber' : 'text-vital-green'}`}>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">Anomaly Score</span>
+                <Tooltip>
+                  <TooltipTrigger><Info className="w-3 h-3 text-muted-foreground/60" /></TooltipTrigger>
+                  <TooltipContent><p className="text-xs">Probability of unsafe kinematic trajectory (0-1.0)</p></TooltipContent>
+                </Tooltip>
+              </div>
+              <p className={`text-lg mt-0.5 font-mono font-bold ${latestFrame.anomalyScore > 0.7 ? 'text-destructive' : latestFrame.anomalyScore > 0.3 ? 'text-alert-amber' : 'text-vital-green'}`}>
                 {latestFrame.anomalyScore.toFixed(3)}
               </p>
             </div>
           </div>
 
           <div className="mb-4">
-            <h4 className="mb-2 text-xs font-medium text-muted-foreground">End Effector Position</h4>
+            <div className="mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">End Effector Position</h4>
+              <Tooltip>
+                <TooltipTrigger><Info className="w-3 h-3 text-muted-foreground/60" /></TooltipTrigger>
+                <TooltipContent><p className="text-xs">Real-time XYZ spatial coordinates of the surgical tip in mm</p></TooltipContent>
+              </Tooltip>
+            </div>
             <div className="grid grid-cols-3 gap-2">
               {(['x', 'y', 'z'] as const).map((axis) => (
                 <div key={axis} className="rounded bg-muted p-2 text-center">
@@ -80,7 +92,13 @@ export function TelemetryPanel({ deviceId, latestFrame, connectionStatus }: Tele
           </div>
 
           <div>
-            <h4 className="mb-2 text-xs font-medium text-muted-foreground">Joint Angles (6-axis)</h4>
+            <div className="mb-2 flex items-center gap-1.5 mt-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Joint Angles (6-axis)</h4>
+              <Tooltip>
+                <TooltipTrigger><Info className="w-3 h-3 text-muted-foreground/60" /></TooltipTrigger>
+                <TooltipContent><p className="text-xs">Current angular deflection for all 6 DOF robotic joints</p></TooltipContent>
+              </Tooltip>
+            </div>
             <div className="space-y-1.5">
               {latestFrame.joints.map((joint) => (
                 <div key={joint.jointId} className="flex items-center gap-2">

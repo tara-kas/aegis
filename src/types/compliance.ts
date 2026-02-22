@@ -11,6 +11,7 @@ export interface ComplianceItem {
   regulation: 'eu-ai-act' | 'dora' | 'mdr' | 'gdpr' | 'hipaa';
   riskLevel: 'high' | 'medium' | 'low';
   articleReference?: string;
+  externalLink?: string;
 }
 
 export type ComplianceCategory =
@@ -39,6 +40,7 @@ export interface Incident {
   relatedAlerts: string[];
   impactAssessment?: string;
   slackChannelId?: string;
+  externalLink?: string;
 }
 
 export interface AuditEntry {

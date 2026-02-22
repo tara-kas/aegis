@@ -1,5 +1,6 @@
 import type { ComplianceScore } from '../../types/compliance';
-import { Shield } from 'lucide-react';
+import { Shield, Info } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ComplianceScoreCardProps {
   scores: ComplianceScore[];
@@ -11,6 +12,19 @@ function getScoreColor(score: number, max: number): string {
   if (pct >= 60) return 'text-alert-amber';
   return 'text-destructive';
 }
+
+const CATEGORY_EXPLANATIONS: Record<string, string> = {
+  'transparency': 'Requirement to disclose AI usage and system capabilities to users.',
+  'human-oversight': 'Ensuring human-in-the-loop control and override mechanisms.',
+  'technical-documentation': 'Maintaining thorough system architecture and operation logs.',
+  'risk-management': 'Continuous monitoring and mitigation of operational risks.',
+  'data-governance': 'Applying privacy, minimisation, and quality controls to data.',
+  'bias-monitoring': 'Ensuring models do not produce demographically biased outputs.',
+  'cybersecurity': 'Protecting the system against adversarial threats and breaches.',
+  'incident-reporting': 'Structuring and logging adverse events for regulatory review.',
+  'third-party-management': 'Mapping and managing risks from external vendors and APIs.',
+  'model-governance': 'Tracking versioning, validation, and deployment of AI models.',
+};
 
 function getBarColor(score: number, max: number): string {
   const pct = (score / max) * 100;
@@ -41,24 +55,40 @@ export function ComplianceScoreCard({ scores }: ComplianceScoreCardProps) {
           </p>
         </div>
 
-        <div className="space-y-3">
-          {scores.map((s) => {
-            const pct = s.maxScore > 0 ? (s.score / s.maxScore) * 100 : 0;
-            return (
-              <div key={s.category}>
-                <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs capitalize text-foreground/80">{s.category.replace(/-/g, ' ')}</span>
-                  <span className={`text-xs font-mono ${getScoreColor(s.score, s.maxScore)}`}>
-                    {s.score}/{s.maxScore}
-                  </span>
+        <TooltipProvider delayDuration={200}>
+          <div className="space-y-3">
+            {scores.map((s) => {
+              const pct = s.maxScore > 0 ? (s.score / s.maxScore) * 100 : 0;
+              const explanation = CATEGORY_EXPLANATIONS[s.category] || 'Regulatory compliance category score.';
+
+              return (
+                <div key={s.category}>
+                  <div className="mb-1 flex items-center justify-between">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-1.5 cursor-help">
+                          <span className="text-xs capitalize text-foreground/80 border-b border-dashed border-muted-foreground/30 hover:border-foreground/50 transition-colors">
+                            {s.category.replace(/-/g, ' ')}
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[200px]">
+                        <p className="text-xs text-muted-foreground leading-relaxed">{explanation}</p>
+                      </TooltipContent>
+                    </Tooltip>
+
+                    <span className={`text-xs font-mono pr-1 ${getScoreColor(s.score, s.maxScore)}`}>
+                      {s.score}/{s.maxScore}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div className={`h-full rounded-full transition-all duration-1000 ${getBarColor(s.score, s.maxScore)}`} style={{ width: `${pct}%` }} />
+                  </div>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                  <div className={`h-full rounded-full ${getBarColor(s.score, s.maxScore)}`} style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </TooltipProvider>
       </div>
     </div>
   );

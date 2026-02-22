@@ -45,6 +45,9 @@ describe('CompliancePanel', () => {
 
   it('should allow escalating incidents', () => {
     renderWithRouter(<CompliancePanel />);
+    const incidentTrigger = screen.getByText('Critical Kinematic Deviation — Joint 4 Wrist Rotation');
+    fireEvent.click(incidentTrigger);
+
     const escalateButtons = screen.getAllByText('Escalate');
     expect(escalateButtons.length).toBeGreaterThanOrEqual(1);
     fireEvent.click(escalateButtons[0]);

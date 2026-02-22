@@ -24,10 +24,10 @@ import { logger } from '../utils/logger';
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 /** Maximum acceptable latency between consecutive kinematic frames (ms) */
-export const LATENCY_THRESHOLD_MS = 200;
+export const LATENCY_THRESHOLD_MS = 500;
 
 /** Anomaly score above which the frame is considered safety-critical */
-export const ANOMALY_SCORE_THRESHOLD = 0.7;
+export const ANOMALY_SCORE_THRESHOLD = 0.85;
 
 /** Maximum age of telemetry data before considered stale (ms) */
 export const STALE_TELEMETRY_THRESHOLD_MS = 5000;

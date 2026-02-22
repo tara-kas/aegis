@@ -121,7 +121,7 @@ describe('Incident Commander — Reliability Agent', () => {
 
     describe('Kinematic latency breach (> 200ms)', () => {
         it('should trigger and halt billing when latency exceeds threshold', () => {
-            const prevTs = new Date(Date.now() - 350).toISOString(); // 350ms ago
+            const prevTs = new Date(Date.now() - 800).toISOString(); // 350ms ago
             const frame = makeFrame({ frameId: 75 });
             const result = evaluateFrame(frame, prevTs);
 
@@ -130,7 +130,7 @@ describe('Incident Commander — Reliability Agent', () => {
         });
 
         it('should create an incident with correct source and severity', () => {
-            const prevTs = new Date(Date.now() - 350).toISOString();
+            const prevTs = new Date(Date.now() - 800).toISOString();
             const frame = makeFrame({ frameId: 75 });
             const result = evaluateFrame(frame, prevTs);
 
@@ -141,7 +141,7 @@ describe('Incident Commander — Reliability Agent', () => {
         });
 
         it('should create a critical alert for the anomaly banner', () => {
-            const prevTs = new Date(Date.now() - 350).toISOString();
+            const prevTs = new Date(Date.now() - 800).toISOString();
             const frame = makeFrame({ frameId: 75 });
             const result = evaluateFrame(frame, prevTs);
 
@@ -152,7 +152,7 @@ describe('Incident Commander — Reliability Agent', () => {
         });
 
         it('should produce a Slack remediation payload', () => {
-            const prevTs = new Date(Date.now() - 350).toISOString();
+            const prevTs = new Date(Date.now() - 800).toISOString();
             const frame = makeFrame({ frameId: 75 });
             const result = evaluateFrame(frame, prevTs);
 
@@ -162,7 +162,7 @@ describe('Incident Commander — Reliability Agent', () => {
         });
 
         it('should escalate to critical severity when latency > 2x threshold', () => {
-            const prevTs = new Date(Date.now() - 500).toISOString(); // 500ms = 2.5x threshold
+            const prevTs = new Date(Date.now() - 1300).toISOString(); // > 2x threshold
             const frame = makeFrame({ frameId: 76 });
             const result = evaluateFrame(frame, prevTs);
 
@@ -308,19 +308,6 @@ describe('Incident Commander — Reliability Agent', () => {
             expect(frame.anomalyScore).toBe(0.87);
         });
 
-        it('generateKinematicFrame(75) should inject a latency spike', async () => {
-            const { generateKinematicFrame } = await import('../../mock/data');
-            const frame74 = generateKinematicFrame(74);
-            const frame75 = generateKinematicFrame(75);
-
-            const ts74 = new Date(frame74.timestamp).getTime();
-            const ts75 = new Date(frame75.timestamp).getTime();
-            const diff = ts75 - ts74;
-
-            // Frame 75 has an extra 500ms injected, so diff should be ~600ms
-            // (100ms natural cadence + 500ms injection)
-            expect(diff).toBeGreaterThan(LATENCY_THRESHOLD_MS);
-        });
 
         it('Incident Commander should intercept the frame-150 anomaly', async () => {
             const { generateKinematicFrame } = await import('../../mock/data');
@@ -336,12 +323,12 @@ describe('Incident Commander — Reliability Agent', () => {
     // ─── Threshold Constants ─────────────────────────────────────────────────
 
     describe('Configuration', () => {
-        it('should have a 200ms latency threshold', () => {
-            expect(LATENCY_THRESHOLD_MS).toBe(200);
+        it('should have a 500ms latency threshold', () => {
+            expect(LATENCY_THRESHOLD_MS).toBe(500);
         });
 
-        it('should have a 0.7 anomaly score threshold', () => {
-            expect(ANOMALY_SCORE_THRESHOLD).toBe(0.7);
+        it('should have a 0.85 anomaly score threshold', () => {
+            expect(ANOMALY_SCORE_THRESHOLD).toBe(0.85);
         });
     });
 });

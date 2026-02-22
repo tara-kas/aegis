@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { MarginData, TimePeriod } from '../../types/financial';
 import { TrendingUp, DollarSign, AlertTriangle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 
 interface MarginDisplayProps {
   margins: MarginData[];
@@ -90,24 +91,32 @@ export function MarginDisplay({ margins, isLoading = false, error = null }: Marg
           </div>
 
           <div className="space-y-3">
-            {margins.map((m) => (
-              <div key={m.id} className="rounded-lg bg-muted p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-medium text-foreground">{m.workflowName}</span>
-                  <span className="text-xs font-mono text-vital-green">{formatCurrency(m.margin)}</span>
-                </div>
-                <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-muted-foreground/20">
-                  <div className="h-full rounded-full bg-vital-green" style={{ width: `${m.marginPercent}%` }} />
-                </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {m.costs.crusoeInference > 0 && <span>Crusoe: {formatCurrency(m.costs.crusoeInference)}</span>}
-                  {m.costs.elevenLabsVoice > 0 && <span>ElevenLabs: {formatCurrency(m.costs.elevenLabsVoice)}</span>}
-                  {m.costs.googleHaiDef > 0 && <span>HAI-DEF: {formatCurrency(m.costs.googleHaiDef)}</span>}
-                  {m.costs.supabaseStorage > 0 && <span>Supabase: {formatCurrency(m.costs.supabaseStorage)}</span>}
-                  {m.costs.solanaFees > 0 && <span><DollarSign className="inline w-3 h-3" />SOL: {formatCurrency(m.costs.solanaFees)}</span>}
-                </div>
-              </div>
-            ))}
+            <Accordion type="single" collapsible className="w-full space-y-3">
+              {margins.map((m) => (
+                <AccordionItem key={m.id} value={m.id} className="rounded-lg bg-muted border-none overflow-hidden hover:bg-muted/80 transition-colors">
+                  <AccordionTrigger className="w-full flex items-center justify-between px-4 py-3 hover:no-underline">
+                    <div className="flex-1 min-w-0 pr-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-sm font-medium text-foreground truncate">{m.workflowName}</span>
+                        <span className="text-xs font-mono text-vital-green whitespace-nowrap">{formatCurrency(m.margin)}</span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted-foreground/20">
+                        <div className="h-full rounded-full bg-vital-green" style={{ width: `${m.marginPercent}%` }} />
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="px-4 pb-4 pt-1">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 pt-3 border-t border-border/50 text-xs text-muted-foreground">
+                      {m.costs.crusoeInference > 0 && <span>Crusoe: {formatCurrency(m.costs.crusoeInference)}</span>}
+                      {m.costs.elevenLabsVoice > 0 && <span>ElevenLabs: {formatCurrency(m.costs.elevenLabsVoice)}</span>}
+                      {m.costs.googleHaiDef > 0 && <span>HAI-DEF: {formatCurrency(m.costs.googleHaiDef)}</span>}
+                      {m.costs.supabaseStorage > 0 && <span>Supabase: {formatCurrency(m.costs.supabaseStorage)}</span>}
+                      {m.costs.solanaFees > 0 && <span><DollarSign className="inline w-3 h-3" />SOL: {formatCurrency(m.costs.solanaFees)}</span>}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
           </div>
         </div>
       )}

@@ -11,6 +11,36 @@
  * - user_roles: SELECT own role for authenticated users
  */
 
+/**
+ * SQL Definitions for deployment:
+ * Run these in your Supabase SQL editor to enforce RLS and the new surgical_session_id constraint.
+ */
+export const DEPLOYMENT_RLS_SQL = `
+-- 1. Enable RLS on all tables
+ALTER TABLE fhir_patients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fhir_encounters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fhir_observations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
+
+-- 2. Clinician Access Policies
+CREATE POLICY "Clinicians can CRUD patients" ON fhir_patients
+  FOR ALL USING (has_role('clinician', auth.uid()));
+
+CREATE POLICY "Clinicians can CRUD encounters" ON fhir_encounters
+  FOR ALL USING (has_role('clinician', auth.uid()));
+
+CREATE POLICY "Clinicians can CRUD observations" ON fhir_observations
+  FOR ALL USING (has_role('clinician', auth.uid()));
+
+-- 3. User Roles Policy (read own role)
+CREATE POLICY "Users can read own role" ON user_roles
+  FOR SELECT USING (auth.uid() = user_id);
+
+-- 4. Enforce surgical_session_id anchor (if not already applied)
+ALTER TABLE fhir_encounters ADD COLUMN IF NOT EXISTS surgical_session_id TEXT NOT NULL DEFAULT 'session-000';
+ALTER TABLE fhir_observations ADD COLUMN IF NOT EXISTS surgical_session_id TEXT NOT NULL DEFAULT 'session-000';
+`;
+
 import { supabase } from '@/integrations/supabase/client';
 import { logger } from '../utils/logger';
 
@@ -27,7 +57,7 @@ export interface SupabaseQueryOptions {
 
 export async function supabaseQuery<T>(options: SupabaseQueryOptions): Promise<{ data: T[] | null; error: string | null }> {
   try {
-    let query = supabase.from(options.table).select(options.select ?? '*');
+    let query = supabase.from(options.table as any).select(options.select ?? '*');
 
     if (options.filters) {
       for (const [key, value] of Object.entries(options.filters)) {
@@ -59,12 +89,12 @@ export async function supabaseInsert<T extends Record<string, unknown>>(
   table: string,
   record: T,
 ): Promise<{ data: T | null; error: string | null }> {
-  const { data, error } = await supabase.from(table).insert(record).select().single();
+  const { data, error } = await supabase.from(table as any).insert(record as any).select().single();
   if (error) {
     logger.error('Supabase insert failed', { table, error: error.message });
     return { data: null, error: error.message };
   }
-  return { data: data as T, error: null };
+  return { data: data as any as T, error: null };
 }
 
 export async function logPhiAccess(
