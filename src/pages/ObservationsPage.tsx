@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { getMockObservationRows } from '@/lib/mock-fallback';
+import { isMockOnly } from '@/lib/data-mode';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import MetricCard from '@/components/dashboard/MetricCard';
 import StatusBadge from '@/components/dashboard/StatusBadge';
@@ -13,6 +14,7 @@ export default function ObservationsPage() {
   const { data: observations, isLoading } = useQuery({
     queryKey: ['fhir-observations'],
     queryFn: async () => {
+      if (isMockOnly()) return getMockObservationRows();
       const { data, error } = await supabase
         .from('fhir_observations')
         .select('*, fhir_patients(name_family, name_given)')

@@ -440,13 +440,17 @@ export function useFinancialData(
 
     // Subscribe to real-time billing events so the dashboard updates
     // immediately when new traces are recorded, not just on poll cycle.
-    const unsubscribe = onTraceRecorded(() => {
-      if (mountedRef.current) fetchAll();
-    });
+    // In mock mode, skip the subscription — we only show static mock data.
+    let unsubscribe: (() => void) | undefined;
+    if (!isMockOnly()) {
+      unsubscribe = onTraceRecorded(() => {
+        if (mountedRef.current) fetchAll();
+      });
+    }
 
     return () => {
       mountedRef.current = false;
-      unsubscribe();
+      unsubscribe?.();
     };
   }, [fetchAll]);
 

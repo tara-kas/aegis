@@ -7,6 +7,7 @@ import { traceObservationWorkflow, onTraceRecorded, getTraceStore } from '../api
 import { evaluateFrame, onSafetyAlert } from '../api/reliability-agents';
 import { validateFhirResource } from '../utils/fhirValidation';
 import { createFhirMeta, generateFhirId, formatFhirDateTime } from '../utils/fhirValidation';
+import { isMockOnly } from '../lib/data-mode';
 import { logger } from '../utils/logger';
 import { metrics } from '../utils/metrics';
 
@@ -183,15 +184,18 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
             };
 
             // Fire-and-forget — billing must never block vital-sign rendering
-            traceObservationWorkflow({
-              workflowId: 'continuous_vitals_monitoring',
-              observation: obs,
-              billedAmount: DEFAULT_VITAL_BILLED,
-              costs: DEFAULT_VITAL_COSTS,
-              metadata: { deviceId, vitalCode: primary.code },
-            }).catch(() => {
-              // swallow — billing failures must not crash telemetry
-            });
+            // In mock mode, skip billing entirely to keep the trace store clean
+            if (!isMockOnly()) {
+              traceObservationWorkflow({
+                workflowId: 'continuous_vitals_monitoring',
+                observation: obs,
+                billedAmount: DEFAULT_VITAL_BILLED,
+                costs: DEFAULT_VITAL_COSTS,
+                metadata: { deviceId, vitalCode: primary.code },
+              }).catch(() => {
+                // swallow — billing failures must not crash telemetry
+              });
+            }
           }
 
           return updated;

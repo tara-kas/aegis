@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import { useTelemetry } from '../hooks/useTelemetry';
 import { mockPatients, mockEncounters, mockObservations, mockProcedures } from '../mock/data';
 import { VitalSignCard } from './clinical/VitalSignCard';
@@ -5,8 +6,11 @@ import { AnomalyAlertBanner } from './clinical/AnomalyAlertBanner';
 import { PatientViewer } from './clinical/PatientViewer';
 import { TelemetryPanel } from './clinical/TelemetryPanel';
 import { EncounterTimeline } from './clinical/EncounterTimeline';
+import { VoiceScribeWidget } from './clinical/VoiceScribeWidget';
 import { Activity, Play, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { FhirObservation } from '@/api/fhir';
+import type { ScribeObservationResult } from '@/api/voice-scribe';
 
 interface ClinicalDashboardProps {
   patientId?: string;
@@ -15,9 +19,23 @@ interface ClinicalDashboardProps {
 export function ClinicalDashboard({ patientId = 'patient-001' }: ClinicalDashboardProps) {
   const patient = mockPatients.find((p) => p.id === patientId) ?? mockPatients[0];
   const encounter = mockEncounters.find((e) => e.subject.reference === `Patient/${patientId}` && e.status === 'in-progress');
-  const observations = mockObservations.filter((o) => o.subject.reference === `Patient/${patientId}`);
+  const baseObservations = mockObservations.filter((o) => o.subject.reference === `Patient/${patientId}`);
 
   const { vitals, alerts, latestFrame, connectionStatus, acknowledgeAlert, dismissAlert, isStreaming, startStream, stopStream } = useTelemetry({ deviceId: 'robot-arm-001' });
+
+  // ── Scribe-generated observations surface in the UI immediately ─────────
+  const [scribeObservations, setScribeObservations] = useState<FhirObservation[]>([]);
+
+  const handleScribeObservation = useCallback((result: ScribeObservationResult) => {
+    // Append the new FHIR Observation so <PatientViewer> picks it up
+    // without a page refresh. The billing trace is already recorded by
+    // processScribeObservation() → traceObservationWorkflow(), so the
+    // FinancialDashboard updates automatically via onTraceRecorded().
+    setScribeObservations((prev) => [result.observation, ...prev]);
+  }, []);
+
+  // Merge base + scribe observations for the PatientViewer
+  const observations = [...scribeObservations, ...baseObservations];
 
   return (
     <div className="space-y-6">
@@ -55,7 +73,8 @@ export function ClinicalDashboard({ patientId = 'patient-001' }: ClinicalDashboa
         <div className="col-span-4">
           <TelemetryPanel deviceId="robot-arm-001" latestFrame={latestFrame} connectionStatus={connectionStatus} />
         </div>
-        <div className="col-span-4">
+        <div className="col-span-4 space-y-6">
+          <VoiceScribeWidget onObservationCreated={handleScribeObservation} />
           <EncounterTimeline encounters={mockEncounters} procedures={mockProcedures} />
         </div>
       </div>

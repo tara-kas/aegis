@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { getMockPatientRows } from '@/lib/mock-fallback';
+import { isMockOnly } from '@/lib/data-mode';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import MetricCard from '@/components/dashboard/MetricCard';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -13,6 +14,7 @@ export default function PatientsPage() {
   const { data: patients, isLoading } = useQuery({
     queryKey: ['fhir-patients'],
     queryFn: async () => {
+      if (isMockOnly()) return getMockPatientRows();
       const { data, error } = await supabase
         .from('fhir_patients')
         .select('*')
