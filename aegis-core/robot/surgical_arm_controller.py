@@ -61,6 +61,7 @@ SENSOR_NAMES = [
 # How long each phase lasts (seconds of sim time) before cycling
 SUTURE_PHASE_DURATION = 8.0      # one full suture loop
 INCISION_PHASE_DURATION = 6.0    # one full incision stroke
+RETRACT_PHASE_DURATION = 3.0      # safe position transition
 
 # Breathing compensation: ~15 breaths/min → 0.25 Hz, ±2 mm amplitude
 BREATHING_FREQ_HZ = 0.25
@@ -121,9 +122,10 @@ class SurgicalArmController:
         # Simulation time tracker
         self.t = 0.0
 
-        # Surgical phase: alternates between "suture" and "incision"
+        # Surgical phase: cycles between "suture", "retract", and "incision"
         self.phase = "suture"
         self.phase_start_t = 0.0
+        self.retract_start_position = None
 
         print("[CONTROLLER] UR5e motors and sensors initialised successfully")
         print(f"[CONTROLLER] Telemetry interval: {TELEMETRY_SEND_INTERVAL_MS} ms")
@@ -133,57 +135,56 @@ class SurgicalArmController:
 
     def _suture_targets(self, phase_t: float) -> List[float]:
         """
-        Generate joint targets for a suturing motion.
+        Generate joint targets for a suturing motion over patient torso.
 
-        The end-effector traces small elliptical loops (needle-driving)
-        while the wrist rotates to simulate knot-tying.
+        The toolSlot rotation in the world file means the surgical pencil
+        points in the tool0 -X direction. wrist_2 = -1.5708 rotates tool0 X
+        upward, making the pencil point straight down at the patient.
 
-        phase_t: seconds elapsed within the current suture phase.
+        phase_t: seconds elapsed within current suture phase.
         """
-        # Normalise to [0, 2π] over the phase duration
         theta = (phase_t / SUTURE_PHASE_DURATION) * 2.0 * math.pi
 
-        # Shoulder: nearly stationary, slight lateral adjustment
-        shoulder_pan = 0.05 * math.sin(theta)
-        # Shoulder lift: small controlled dip for needle entry
-        shoulder_lift = -0.40 + 0.03 * math.sin(theta)
-        # Elbow: primary elliptical drive — small amplitude
-        elbow = 0.60 + 0.05 * math.cos(theta)
-        # Wrist 1: needle rotation (quarter-turn arcs)
-        wrist_1 = 0.15 * math.sin(2.0 * theta)
-        # Wrist 2: lateral fine adjustment
-        wrist_2 = 0.08 * math.cos(theta)
-        # Wrist 3: knot-tying twist
-        wrist_3 = 0.12 * math.sin(3.0 * theta)
+        # Shoulder pan: centered toward patient, sweeping lateral motion
+        shoulder_pan  = 0.5 + 0.15 * math.sin(theta)
+        # Shoulder lift + elbow sum to ~0 so forearm is horizontal
+        shoulder_lift = -1.0 + 0.08 * math.sin(theta)
+        elbow         = 0.8  + 0.08 * math.cos(theta)
+        # wrist_1: +1.5708 rotates tool0 X upward -> pencil -X points DOWN
+        # small oscillation for needle depth variation around downward position
+        wrist_1       = -1.5708 + 0.20 * math.sin(2.0 * theta)
+        # wrist_2: lateral blade angle during suturing
+        wrist_2       = 0.15 * math.cos(theta)
+        # wrist_3: knot-tying twist around pencil long axis
+        wrist_3       = 0.30 * math.sin(3.0 * theta)
 
         return [shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]
 
     def _incision_targets(self, phase_t: float) -> List[float]:
         """
-        Generate joint targets for a linear incision stroke.
+        Generate joint targets for a linear incision stroke over patient.
 
-        The end-effector moves in a slow, straight line along the Y-axis
-        (the "cut" direction) with controlled Z depth.
+        wrist_2 held at -1.5708 keeps pencil pointing straight down
+        throughout the entire stroke. Shoulder pan creates the sweeping
+        motion along the patient's midline.
 
-        phase_t: seconds elapsed within the current incision phase.
+        phase_t: seconds elapsed within current incision phase.
         """
-        # Progress from 0→1 over the phase, then reverse (back-and-forth)
-        progress = phase_t / INCISION_PHASE_DURATION
-        # Triangle wave: 0→1→0 for smooth back-and-forth stroke
-        triangle = 1.0 - abs(2.0 * progress - 1.0)
+        progress  = phase_t / INCISION_PHASE_DURATION
+        triangle  = 1.0 - abs(2.0 * progress - 1.0)
 
-        # Shoulder: translate along the incision line
-        shoulder_pan = 0.02 * triangle
-        # Shoulder lift: maintain steady depth
-        shoulder_lift = -0.42 + 0.01 * triangle
-        # Elbow: extend slightly during the stroke
-        elbow = 0.58 + 0.04 * triangle
-        # Wrist 1: keep blade angle constant
-        wrist_1 = 0.05
-        # Wrist 2: slight roll for blade orientation
-        wrist_2 = 0.03 * math.sin(math.pi * progress)
-        # Wrist 3: no twist during incision
-        wrist_3 = 0.02 * triangle
+        # Long sweep along incision line
+        shoulder_pan  = 0.30 + 0.25 * triangle
+        # Maintain consistent depth
+        shoulder_lift = -1.0 + 0.03 * triangle
+        # Extend slightly during stroke
+        elbow         = 0.8  + 0.05 * triangle
+        # wrist_1: +1.5708 keeps pencil pointing straight down throughout stroke
+        wrist_1       = -1.5708
+        # wrist_2: neutral during straight cut
+        wrist_2       = 0.0
+        # wrist_3: no twist during incision
+        wrist_3       = 0.0
 
         return [shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]
 
@@ -205,6 +206,30 @@ class SurgicalArmController:
             0.0,                                    # wrist 3 — unaffected
         ]
 
+    def _retract_targets(self, phase_t: float) -> List[float]:
+        """
+        Generate joint targets for smooth retraction to safe position.
+
+        Linear interpolation from current position to neutral safe position
+        over 3 second duration. Makes motion look deliberate and safe.
+        """
+        # Safe neutral position — pencil pointing down via wrist_1=+1.5708
+        safe_position = [0.45, -0.8, 0.8, 1.5708, 0.0, 0.0]
+        
+        # Store starting position on first call
+        if self.retract_start_position is None:
+            self.retract_start_position = [sensor.getValue() for sensor in self.position_sensors]
+            print(f"[TRAJECTORY] t={self.t:.1f}s — RETRACTING to safe position")
+        
+        # Linear interpolation over 3 seconds
+        progress = min(phase_t / RETRACT_PHASE_DURATION, 1.0)
+        targets = [
+            start + (safe - start) * progress
+            for start, safe in zip(self.retract_start_position, safe_position)
+        ]
+        
+        return targets
+
     def move_arm(self):
         """
         Drive the UR5e through realistic surgical trajectories.
@@ -215,25 +240,33 @@ class SurgicalArmController:
         dt = self.timestep / 1000.0
         self.t += dt
 
-        # ── Phase management: cycle between suture ↔ incision ─────────
+        # ── Phase management: cycle suture → retract → incision → retract → suture ─────────
         phase_t = self.t - self.phase_start_t
 
         if self.phase == "suture" and phase_t >= SUTURE_PHASE_DURATION:
+            self.phase = "retract"
+            self.phase_start_t = self.t
+            phase_t = 0.0
+            print(f"[TRAJECTORY] t={self.t:.1f}s — switching to RETRACT phase")
+        elif self.phase == "retract" and phase_t >= RETRACT_PHASE_DURATION:
             self.phase = "incision"
             self.phase_start_t = self.t
             phase_t = 0.0
+            self.retract_start_position = None
             print(f"[TRAJECTORY] t={self.t:.1f}s — switching to INCISION phase")
         elif self.phase == "incision" and phase_t >= INCISION_PHASE_DURATION:
-            self.phase = "suture"
+            self.phase = "retract"
             self.phase_start_t = self.t
             phase_t = 0.0
-            print(f"[TRAJECTORY] t={self.t:.1f}s — switching to SUTURE phase")
+            print(f"[TRAJECTORY] t={self.t:.1f}s — switching to RETRACT phase")
 
         # ── Compute trajectory + breathing overlay ────────────────────
         if self.phase == "suture":
             targets = self._suture_targets(phase_t)
-        else:
+        elif self.phase == "incision":
             targets = self._incision_targets(phase_t)
+        else:  # retract phase
+            targets = self._retract_targets(phase_t)
 
         breathing = self._breathing_compensation()
         final_targets = [t + b for t, b in zip(targets, breathing)]
