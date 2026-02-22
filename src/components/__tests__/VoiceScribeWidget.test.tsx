@@ -3,22 +3,70 @@
  *
  * Verifies:
  *   1. Renders in idle state with mic button
- *   2. Clicking transitions to recording (pulsing indicator visible)
- *   3. Clicking again transitions to processing then success
- *   4. Calls processScribeObservation mock pipeline
+ *   2. Clicking requests getUserMedia and transitions to recording
+ *   3. Clicking again stops MediaRecorder, processes via live pipeline
+ *   4. Calls processScribeObservation with a real audio Blob
  *   5. Fires onObservationCreated callback with the observation
  *   6. Displays the result summary card after success
  *   7. Can re-enter idle from success state
  *   8. Handles pipeline errors gracefully
+ *   9. Shows error toast when microphone permission is denied
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { VoiceScribeWidget } from '../clinical/VoiceScribeWidget';
 import { resetTraceStore, getTraceStore } from '@/api/telemetry-billing';
 import { _resetForTesting as resetIncidentCommander } from '@/api/reliability-agents';
+
+// ─── MediaRecorder / getUserMedia Mocks ──────────────────────────────────────
+
+let mockRecorderInstance: MockMediaRecorder | null = null;
+
+class MockMediaRecorder {
+  state = 'inactive' as string;
+  ondataavailable: ((e: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+  stream: MediaStream;
+
+  constructor(stream: MediaStream) {
+    this.stream = stream;
+    mockRecorderInstance = this;
+  }
+
+  start() {
+    this.state = 'recording';
+  }
+
+  stop() {
+    this.state = 'inactive';
+    // Simulate a final data chunk
+    this.ondataavailable?.({
+      data: new Blob(['mock-audio-data'], { type: 'audio/webm' }),
+    });
+    // Fire onstop so the promise in the widget resolves
+    this.onstop?.();
+  }
+}
+
+const mockStopTrack = vi.fn();
+const mockGetUserMedia = vi.fn();
+
+function setupMediaMocks() {
+  mockGetUserMedia.mockResolvedValue({
+    getTracks: () => [{ stop: mockStopTrack }],
+  } as unknown as MediaStream);
+
+  Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+    value: { getUserMedia: mockGetUserMedia },
+    configurable: true,
+    writable: true,
+  });
+
+  (globalThis as any).MediaRecorder = MockMediaRecorder;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +87,10 @@ describe('VoiceScribeWidget', () => {
     resetTraceStore();
     resetIncidentCommander();
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockRecorderInstance = null;
+    mockStopTrack.mockClear();
+    mockGetUserMedia.mockClear();
+    setupMediaMocks();
   });
 
   afterEach(() => {
@@ -72,18 +124,32 @@ describe('VoiceScribeWidget', () => {
     expect(screen.queryByTestId('scribe-recording-indicator')).not.toBeInTheDocument();
   });
 
-  // ── Recording state ────────────────────────────────────────────
+  // ── Recording state (real getUserMedia) ────────────────────────
 
-  it('should transition to recording on first click', async () => {
+  it('should call getUserMedia and transition to recording on first click', async () => {
     renderWidget();
     const btn = screen.getByTestId('scribe-mic-button');
+
     await act(async () => {
       fireEvent.click(btn);
     });
 
+    expect(mockGetUserMedia).toHaveBeenCalledWith({ audio: true });
     expect(screen.getByText('Stop Recording')).toBeInTheDocument();
     expect(screen.getByTestId('scribe-recording-indicator')).toBeInTheDocument();
     expect(screen.getByText('Listening… click to stop')).toBeInTheDocument();
+  });
+
+  it('should start the MediaRecorder when recording begins', async () => {
+    renderWidget();
+    const btn = screen.getByTestId('scribe-mic-button');
+
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+
+    expect(mockRecorderInstance).not.toBeNull();
+    expect(mockRecorderInstance!.state).toBe('recording');
   });
 
   it('should have pulsing class when recording', async () => {
@@ -95,6 +161,46 @@ describe('VoiceScribeWidget', () => {
 
     expect(btn.className).toContain('animate-pulse');
     expect(btn.className).toContain('ring-destructive');
+  });
+
+  // ── Microphone permission denied ───────────────────────────────
+
+  it('should show error toast and reset to idle if mic permission is denied', async () => {
+    mockGetUserMedia.mockRejectedValueOnce(
+      new DOMException('Permission denied', 'NotAllowedError'),
+    );
+
+    renderWidget();
+    const btn = screen.getByTestId('scribe-mic-button');
+
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+
+    // Should return to idle state (not recording)
+    expect(screen.getByText('Start Dictation')).toBeInTheDocument();
+    expect(screen.queryByTestId('scribe-recording-indicator')).not.toBeInTheDocument();
+  });
+
+  it('should still be usable after a denied permission attempt', async () => {
+    // First attempt — denied
+    mockGetUserMedia.mockRejectedValueOnce(
+      new DOMException('Permission denied', 'NotAllowedError'),
+    );
+
+    renderWidget();
+    const btn = screen.getByTestId('scribe-mic-button');
+
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    expect(screen.getByText('Start Dictation')).toBeInTheDocument();
+
+    // Second attempt — allowed (default mock succeeds)
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    expect(screen.getByText('Stop Recording')).toBeInTheDocument();
   });
 
   // ── Processing → Success state ─────────────────────────────────
@@ -111,17 +217,14 @@ describe('VoiceScribeWidget', () => {
     });
     expect(screen.getByText('Stop Recording')).toBeInTheDocument();
 
-    // Click to stop → enters processing
+    // Click to stop → enters processing, then runs pipeline
     await act(async () => {
       fireEvent.click(btn);
     });
 
-    // Should show "Processing…"
-    expect(screen.getByText('Processing…')).toBeInTheDocument();
-
-    // Advance past the 2-second delay + the mock pipeline internal delay
+    // Advance timers past the mock pipeline delays (150ms in transcribeAudioMock)
     await act(async () => {
-      vi.advanceTimersByTime(3000);
+      vi.advanceTimersByTime(500);
     });
 
     // Wait for the success state
@@ -139,6 +242,30 @@ describe('VoiceScribeWidget', () => {
     expect(result.transcript).toContain('110 bpm');
     expect(result.billing.trace.billedAmount).toBe(125.00);
     expect(result.billing.shouldSettle).toBe(true);
+  });
+
+  it('should release the microphone stream after processing', async () => {
+    renderWidget();
+    const btn = screen.getByTestId('scribe-mic-button');
+
+    // Start
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    // Stop
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Dictate Again')).toBeInTheDocument();
+    });
+
+    // The mock track's stop() should have been called
+    expect(mockStopTrack).toHaveBeenCalled();
   });
 
   // ── Billing trace fires to trace store ─────────────────────────
@@ -160,7 +287,7 @@ describe('VoiceScribeWidget', () => {
 
     // Advance timers
     await act(async () => {
-      vi.advanceTimersByTime(3000);
+      vi.advanceTimersByTime(500);
     });
 
     await waitFor(() => {
@@ -185,7 +312,7 @@ describe('VoiceScribeWidget', () => {
     // Full cycle: idle → recording → processing → success
     await act(async () => { fireEvent.click(btn); });
     await act(async () => { fireEvent.click(btn); });
-    await act(async () => { vi.advanceTimersByTime(3000); });
+    await act(async () => { vi.advanceTimersByTime(500); });
 
     await waitFor(() => {
       expect(screen.getByText('Dictate Again')).toBeInTheDocument();
@@ -213,7 +340,7 @@ describe('VoiceScribeWidget', () => {
     expect(screen.getByText('Processing…')).toBeInTheDocument();
 
     // Cleanup
-    await act(async () => { vi.advanceTimersByTime(3000); });
+    await act(async () => { vi.advanceTimersByTime(500); });
     await waitFor(() => {
       expect(screen.getByText('Dictate Again')).toBeInTheDocument();
     });
@@ -227,7 +354,7 @@ describe('VoiceScribeWidget', () => {
 
     await act(async () => { fireEvent.click(btn); });
     await act(async () => { fireEvent.click(btn); });
-    await act(async () => { vi.advanceTimersByTime(3000); });
+    await act(async () => { vi.advanceTimersByTime(500); });
 
     await waitFor(() => {
       expect(screen.getByTestId('scribe-result')).toBeInTheDocument();

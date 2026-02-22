@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { VitalSign, AnomalyAlert, KinematicFrame, ConnectionStatus } from '../types/telemetry';
+import type { VitalSign, AnomalyAlert, KinematicFrame, ConnectionStatus, JointAngle } from '../types/telemetry';
 import type { PaidAiTrace, CostBreakdown } from '../types/financial';
 import type { FhirObservation } from '../api/fhir';
 import { mockVitalSigns, mockAnomalyAlerts, tickVitalSigns, maybeGenerateAlert, generateKinematicFrame } from '../mock/data';
@@ -7,9 +7,12 @@ import { traceObservationWorkflow, onTraceRecorded, getTraceStore } from '../api
 import { evaluateFrame, onSafetyAlert } from '../api/reliability-agents';
 import { validateFhirResource } from '../utils/fhirValidation';
 import { createFhirMeta, generateFhirId, formatFhirDateTime } from '../utils/fhirValidation';
-import { isMockOnly } from '../lib/data-mode';
+import { isMockOnly, isLiveMode } from '../lib/data-mode';
+import { crossReferenceAnomaly } from '../api/hai-def';
+import { supabase } from '@/integrations/supabase/client';
 import { logger } from '../utils/logger';
 import { metrics } from '../utils/metrics';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface UseTelemetryOptions {
   deviceId: string;
@@ -63,6 +66,8 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   const vitalTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const kinematicTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const prevFrameTimestamp = useRef<string | null>(null);
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const liveFrameCounter = useRef(0);
 
   // ── Subscribe to billing trace events ────────────────────────────────────
   useEffect(() => {
@@ -124,6 +129,10 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   const stopStream = useCallback(() => {
     if (vitalTimerRef.current) clearInterval(vitalTimerRef.current);
     if (kinematicTimerRef.current) clearInterval(kinematicTimerRef.current);
+    if (realtimeChannelRef.current) {
+      supabase.removeChannel(realtimeChannelRef.current);
+      realtimeChannelRef.current = null;
+    }
     setIsStreaming(false);
     setConnectionStatus('disconnected');
     log.info('Telemetry stream stopped', { deviceId });
@@ -132,8 +141,151 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   const startStream = useCallback(() => {
     stopStream();
     setConnectionStatus('connecting');
-    log.info('Starting telemetry stream', { deviceId });
+    log.info('Starting telemetry stream', { deviceId, mode: isLiveMode() ? 'live' : 'mock' });
 
+    if (isLiveMode()) {
+      // ── LIVE MODE: Subscribe to Supabase Realtime Broadcast ────────────
+      const channel = supabase.channel('telemetry_stream');
+
+      channel
+        .on('broadcast', { event: 'telemetry' }, ({ payload }) => {
+          if (!payload) return;
+
+          const data = payload as {
+            timestamp: string;
+            joint_angles: number[];
+            joint_velocities: number[];
+            end_effector_xyz: number[];
+            applied_forces: number[];
+            anomaly_detected: boolean;
+            anomaly_reason: string | null;
+          };
+
+          const currentFrameId = liveFrameCounter.current++;
+
+          // Map Webots payload → KinematicFrame
+          const joints: JointAngle[] = (data.joint_angles ?? []).map((angle, i) => ({
+            jointId: `joint-${i}`,
+            name: ['shoulder_pan', 'shoulder_lift', 'elbow', 'wrist_1', 'wrist_2', 'wrist_3'][i] ?? `joint_${i}`,
+            angleDeg: (angle * 180) / Math.PI,
+            angleRad: angle,
+            torqueNm: (data.applied_forces ?? [])[i] ?? 0,
+            velocityRadPerSec: (data.joint_velocities ?? [])[i] ?? 0,
+          }));
+
+          const [x = 0, y = 0, z = 0] = data.end_effector_xyz ?? [];
+          const anomalyScore = data.anomaly_detected ? 0.9 : Math.random() * 0.1;
+
+          const frame: KinematicFrame = {
+            timestamp: data.timestamp ?? new Date().toISOString(),
+            frameId: currentFrameId,
+            deviceId,
+            joints,
+            endEffector: {
+              position: { x, y, z },
+              orientation: { roll: 0, pitch: 0, yaw: 0 },
+              forceN: 0,
+              gripperApertureMm: 8,
+            },
+            isAnomalous: data.anomaly_detected ?? false,
+            anomalyScore,
+          };
+
+          setLatestFrame(frame);
+
+          // Incident Commander evaluation on live frames
+          const cmdResult = evaluateFrame(frame, prevFrameTimestamp.current);
+          prevFrameTimestamp.current = frame.timestamp;
+
+          if (cmdResult.triggered) {
+            metrics.increment('incident_commander.triggered', { deviceId, reason: cmdResult.reason });
+            log.warn('Incident Commander triggered (live)', {
+              frameId: frame.frameId,
+              reason: cmdResult.reason,
+            });
+          }
+
+          if (data.anomaly_detected) {
+            metrics.increment('kinematic.anomaly_detected', { deviceId });
+            const alert: AnomalyAlert = {
+              id: `live-anomaly-${currentFrameId}-${Date.now()}`,
+              severity: 'critical',
+              title: 'Robotic Anomaly Detected (Live)',
+              message: data.anomaly_reason ?? 'Kinematic anomaly detected in live telemetry',
+              metric: 'anomaly_score',
+              currentValue: anomalyScore,
+              threshold: 0.5,
+              timestamp: data.timestamp ?? new Date().toISOString(),
+              acknowledged: false,
+              source: 'telemetry',
+            };
+            setAlerts((prev) => [alert, ...prev].slice(0, maxAlerts));
+
+            // Fire-and-forget HAI-DEF cross-reference
+            crossReferenceAnomaly(alert)
+              .then((insights) => {
+                setAlerts((prev) =>
+                  prev.map((a) =>
+                    a.id === alert.id ? { ...a, haiDefInsights: insights } : a,
+                  ),
+                );
+                log.info('HAI-DEF cross-reference complete (live)', {
+                  alertId: alert.id,
+                  confidence: insights.globalConfidenceScore,
+                  source: insights.source,
+                });
+              })
+              .catch((err) => {
+                log.warn('HAI-DEF cross-reference failed (live)', {
+                  alertId: alert.id,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            setConnectionStatus('connected');
+            setIsStreaming(true);
+            metrics.increment('telemetry.stream_started', { deviceId, mode: 'live' });
+            log.info('Supabase Realtime Broadcast connected', { deviceId });
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setConnectionStatus('error');
+            log.error('Supabase Realtime subscription failed', { deviceId, status });
+          }
+        });
+
+      realtimeChannelRef.current = channel;
+
+      // In live mode, still run vital sign simulation from mock data
+      // (vitals come from mock; kinematics come from live Webots)
+      vitalTimerRef.current = setInterval(() => {
+        setVitals((prev) => {
+          const updated = tickVitalSigns(prev);
+          const alert = maybeGenerateAlert(updated);
+          if (alert) {
+            setAlerts((a) => [alert, ...a].slice(0, maxAlerts));
+            metrics.increment('alerts.generated', { deviceId, severity: alert.severity });
+
+            // Fire-and-forget HAI-DEF cross-reference
+            crossReferenceAnomaly(alert)
+              .then((insights) => {
+                setAlerts((a2) =>
+                  a2.map((item) =>
+                    item.id === alert.id ? { ...item, haiDefInsights: insights } : item,
+                  ),
+                );
+              })
+              .catch(() => { /* swallow — HAI-DEF must not crash vitals */ });
+          }
+          return updated;
+        });
+      }, vitalIntervalMs);
+
+      return;
+    }
+
+    // ── MOCK MODE: Existing setInterval-based simulation ─────────────────
     setTimeout(() => {
       setConnectionStatus('connected');
       setIsStreaming(true);
@@ -146,6 +298,17 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
           if (alert) {
             setAlerts((a) => [alert, ...a].slice(0, maxAlerts));
             metrics.increment('alerts.generated', { deviceId, severity: alert.severity });
+
+            // Fire-and-forget HAI-DEF cross-reference
+            crossReferenceAnomaly(alert)
+              .then((insights) => {
+                setAlerts((a2) =>
+                  a2.map((item) =>
+                    item.id === alert.id ? { ...item, haiDefInsights: insights } : item,
+                  ),
+                );
+              })
+              .catch(() => { /* swallow — HAI-DEF must not crash vitals */ });
           }
 
           // ── Auto-bill for each vital-sign observation tick ────────────

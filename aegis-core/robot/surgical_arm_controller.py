@@ -5,7 +5,7 @@ Conceptually modelled on the Da Vinci system.
 import sys
 import os
 
-sys.path.append('/Users/tarak/Documents/GitHub/aegis/aegis-core')
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 import json
 import time
@@ -18,6 +18,8 @@ from controller import Robot, Motor, PositionSensor
 
 from config import (
     BACKEND_URL,
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
     ANOMALY_VELOCITY_THRESHOLD,
     ANOMALY_POSITION_THRESHOLD,
     TELEMETRY_INTERVAL_MS
@@ -185,33 +187,47 @@ class SurgicalArmController:
         return payload
 
     def send_telemetry(self, payload: Dict) -> bool:
-        url = f"{BACKEND_URL}/functions/v1/telemetry-ingest"
-        
+        """Send telemetry via Edge Function AND broadcast via Supabase Realtime."""
+        base = SUPABASE_URL or BACKEND_URL
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {os.getenv('SUPABASE_ANON_KEY')}",
-            "apikey": os.getenv("SUPABASE_ANON_KEY")
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+            "apikey": SUPABASE_ANON_KEY
         }
-        
+
+        success = False
+
+        # 1. Edge Function ingest (database persistence)
+        ingest_url = f"{base}/functions/v1/telemetry-ingest"
         for attempt in range(3):
             try:
-                response = httpx.post(
-                    url,
-                    json=payload,
-                    headers=headers,
-                    timeout=5.0
-                )
+                response = httpx.post(ingest_url, json=payload, headers=headers, timeout=5.0)
                 response.raise_for_status()
-                return True
+                success = True
+                break
             except Exception as e:
                 if attempt < 2:
                     time.sleep(0.5)
                     continue
                 else:
                     print(f"[ERROR] Failed to send telemetry after 3 attempts: {e}")
-                    return False
-        
-        return False
+
+        # 2. Realtime Broadcast (live dashboard feed)
+        broadcast_url = f"{base}/realtime/v1/api/broadcast"
+        broadcast_body = {
+            "messages": [{
+                "topic": "telemetry_stream",
+                "event": "telemetry",
+                "payload": payload
+            }]
+        }
+        try:
+            httpx.post(broadcast_url, json=broadcast_body, headers=headers, timeout=2.0)
+        except Exception as e:
+            # Broadcast failure is non-fatal — Edge Function is the primary path
+            print(f"[WARN] Broadcast failed (non-fatal): {e}")
+
+        return success
 
     def log_telemetry(self, payload: Dict):
         """Append telemetry payload to logs/telemetry.jsonl."""

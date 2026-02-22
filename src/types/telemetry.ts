@@ -64,6 +64,13 @@ export interface AnomalyAlert {
   timestamp: string;
   acknowledged: boolean;
   source: 'telemetry' | 'vitals' | 'inference' | 'system';
+  /** Insights from Google HAI-DEF cross-referencing (populated asynchronously) */
+  haiDefInsights?: {
+    globalConfidenceScore: number;
+    historicalPrecedent: string;
+    retrievedAt: string;
+    source: 'google-hai-def' | 'mock';
+  };
 }
 
 export interface TelemetryStreamConfig {

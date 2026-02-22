@@ -43,6 +43,27 @@ export function AnomalyAlertBanner({ alerts, onDismiss, onAcknowledge }: Anomaly
                 <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">{formatTimestamp(alert.timestamp)}</span>
               </div>
               <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{alert.message}</p>
+              {alert.haiDefInsights && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      background: 'linear-gradient(135deg, #4285F4, #34A853, #FBBC05, #EA4335)',
+                      color: '#fff',
+                      letterSpacing: '0.02em',
+                    }}
+                    title={`Source: ${alert.haiDefInsights.source}`}
+                  >
+                    G HAI-DEF
+                    <span className="ml-0.5 font-bold">
+                      {(alert.haiDefInsights.globalConfidenceScore * 100).toFixed(0)}%
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-muted-foreground italic truncate max-w-[340px]">
+                    {alert.haiDefInsights.historicalPrecedent}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="flex gap-1 flex-shrink-0">
               <button

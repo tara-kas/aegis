@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
     transcribeAudioMock,
+    transcribeAudioLive,
     transcriptToFhirObservation,
     extractVitalsFromTranscript,
     processScribeObservation,
@@ -43,6 +44,42 @@ describe('Medical Voice Scribe', () => {
             expect(result.confidence).toBeGreaterThan(0.9);
             expect(result.durationSec).toBeGreaterThan(0);
             expect(result.isLive).toBe(false);
+        });
+    });
+
+    // ── transcribeAudioLive ─────────────────────────────────────────────────
+
+    describe('transcribeAudioLive()', () => {
+        it('should fall back to mock transcript when API key is not set', async () => {
+            const blob = new Blob(['test-audio-data'], { type: 'audio/webm' });
+            const result = await transcribeAudioLive(blob);
+
+            expect(result.isLive).toBe(false);
+            expect(result.transcript).toContain('heart rate');
+            expect(result.transcript).toContain('110 bpm');
+            expect(result.confidence).toBeGreaterThan(0.9);
+        });
+
+        it('should return a valid TranscribeResult shape', async () => {
+            const blob = new Blob(['test-audio-data'], { type: 'audio/webm' });
+            const result = await transcribeAudioLive(blob);
+
+            expect(result).toHaveProperty('transcript');
+            expect(result).toHaveProperty('confidence');
+            expect(result).toHaveProperty('durationSec');
+            expect(result).toHaveProperty('isLive');
+            expect(typeof result.transcript).toBe('string');
+            expect(typeof result.confidence).toBe('number');
+            expect(typeof result.durationSec).toBe('number');
+            expect(typeof result.isLive).toBe('boolean');
+        });
+
+        it('should gracefully handle any blob type without crashing', async () => {
+            const emptyBlob = new Blob([], { type: 'audio/webm' });
+            const result = await transcribeAudioLive(emptyBlob);
+
+            // Without API key, falls back to mock — app should never crash
+            expect(result.transcript.length).toBeGreaterThan(0);
         });
     });
 
@@ -191,6 +228,20 @@ describe('Medical Voice Scribe', () => {
             expect(result.billing.trace.metadata.source).toBe('voice-scribe');
             expect(result.billing.trace.metadata.confidence).toBeDefined();
             expect(result.billing.trace.metadata.isLive).toBe('false');
+        });
+
+        it('should accept a real audio blob and use transcribeAudioLive path', async () => {
+            const blob = new Blob(['mock-audio-bytes'], { type: 'audio/webm' });
+            const result = await processScribeObservation(blob);
+
+            // Without API key, transcribeAudioLive falls back to mock
+            expect(result.transcript).toContain('110 bpm');
+            expect(result.observation.resourceType).toBe('Observation');
+            expect(result.billing.trace.billedAmount).toBe(125.00);
+            expect(result.billing.trace.workflowId).toBe('autonomous_scribe_observation');
+
+            const validation = validateFhirResource(result.observation);
+            expect(validation.valid).toBe(true);
         });
     });
 

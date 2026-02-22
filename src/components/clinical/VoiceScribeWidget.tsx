@@ -10,8 +10,8 @@
  * Pipeline:
  *   1. User clicks mic → "recording" (pulsing red)
  *   2. User clicks again to stop → "processing" (spinner)
- *   3. Calls processScribeObservation(null) which internally:
- *      a. transcribeAudioMock() → surgical transcript
+ *   3. Calls processScribeObservation(audioBlob) which internally:
+ *      a. transcribeAudioLive(audioBlob) → ElevenLabs STT (or mock fallback)
  *      b. transcriptToFhirObservation() → FHIR R4 Observation
  *      c. traceObservationWorkflow() → Paid.ai $125.00 trace
  *   4. On success: toast notification, fires onObservationCreated
@@ -20,7 +20,7 @@
  *      via the onTraceRecorded listener — no page refresh needed.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Mic, MicOff, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,11 +52,11 @@ interface StateVisual {
 }
 
 const STATE_CONFIG: Record<ScribeState, StateVisual> = {
-  idle:       { icon: Mic,            label: 'Start Dictation', variant: 'default',     pulse: false, disabled: false },
-  recording:  { icon: MicOff,         label: 'Stop Recording',  variant: 'destructive', pulse: true,  disabled: false },
-  processing: { icon: Loader2,        label: 'Processing…',     variant: 'secondary',   pulse: false, disabled: true  },
-  success:    { icon: CheckCircle,    label: 'Dictate Again',   variant: 'outline',     pulse: false, disabled: false },
-  error:      { icon: AlertTriangle,  label: 'Retry',           variant: 'destructive', pulse: false, disabled: false },
+  idle: { icon: Mic, label: 'Start Dictation', variant: 'default', pulse: false, disabled: false },
+  recording: { icon: MicOff, label: 'Stop Recording', variant: 'destructive', pulse: true, disabled: false },
+  processing: { icon: Loader2, label: 'Processing…', variant: 'secondary', pulse: false, disabled: true },
+  success: { icon: CheckCircle, label: 'Dictate Again', variant: 'outline', pulse: false, disabled: false },
+  error: { icon: AlertTriangle, label: 'Retry', variant: 'destructive', pulse: false, disabled: false },
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -66,25 +66,89 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
   const [lastResult, setLastResult] = useState<ScribeObservationResult | null>(null);
   const { toast } = useToast();
 
+  // ── MediaRecorder refs ──────────────────────────────────────────
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // ── Cleanup on unmount (release mic if still active) ────────────
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
   const handleClick = useCallback(async () => {
     if (state === 'idle' || state === 'success' || state === 'error') {
-      // ── Start "recording" ───────────────────────────────────────
-      setState('recording');
+      // ── Start recording with real microphone ────────────────────
       setLastResult(null);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        audioChunksRef.current = [];
+
+        const recorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (e: BlobEvent) => {
+          if (e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+          }
+        };
+
+        recorder.start();
+        setState('recording');
+      } catch (err) {
+        // Microphone permission denied or unavailable
+        setState('idle');
+        toast({
+          title: '❌ Microphone Access Denied',
+          description:
+            err instanceof Error
+              ? err.message
+              : 'Could not access microphone. Please allow microphone permissions and try again.',
+          variant: 'destructive',
+        });
+      }
       return;
     }
 
     if (state === 'recording') {
-      // ── Stop recording → process ───────────────────────────────
+      // ── Stop recording → process via live pipeline ──────────────
       setState('processing');
 
-      try {
-        // Simulate the 2-second processing delay, then run the
-        // full mock pipeline (transcribe → FHIR → Paid.ai $125)
-        await new Promise((r) => setTimeout(r, 2000));
+      const recorder = mediaRecorderRef.current;
+      if (!recorder || recorder.state === 'inactive') {
+        setState('error');
+        toast({
+          title: '❌ Recording Error',
+          description: 'MediaRecorder was not active. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
 
-        // `null` audioBlob triggers transcribeAudioMock() inside the pipeline
-        const result = await processScribeObservation(null);
+      try {
+        // Wait for the recorder to flush remaining data and fire onstop
+        const audioBlob = await new Promise<Blob>((resolve) => {
+          recorder.onstop = () => {
+            const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            resolve(blob);
+          };
+          recorder.stop();
+        });
+
+        // Release the microphone
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        mediaRecorderRef.current = null;
+
+        // Run the full pipeline: transcribeAudioLive → FHIR → Paid.ai $125
+        const result = await processScribeObservation(audioBlob);
 
         setLastResult(result);
         setState('success');
@@ -102,6 +166,11 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
         // Notify parent so ClinicalDashboard can surface the observation
         onObservationCreated?.(result);
       } catch (err) {
+        // Release mic on error too
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        mediaRecorderRef.current = null;
+
         setState('error');
         const message = err instanceof Error ? err.message : 'Unknown error';
         toast({

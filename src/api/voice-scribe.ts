@@ -225,6 +225,60 @@ export async function transcribeAudio(audioBlob: Blob): Promise<TranscribeResult
     }
 }
 
+// ─── Live ElevenLabs Client (named export) ───────────────────────────────────
+
+/**
+ * Sends an audio blob to the ElevenLabs Speech-to-Text REST API.
+ *
+ * Reads `import.meta.env.VITE_ELEVENLABS_API_KEY`. If the key is missing
+ * or the request fails, gracefully falls back to the mock transcript so
+ * the app never crashes.
+ *
+ * @param audioBlob — raw audio data captured by MediaRecorder (webm/wav/mp3)
+ * @returns TranscribeResult with the transcript text
+ */
+export async function transcribeAudioLive(audioBlob: Blob): Promise<TranscribeResult> {
+    const apiKey = getElevenLabsApiKey();
+
+    if (!apiKey) {
+        log.warn('VITE_ELEVENLABS_API_KEY not set — falling back to mock transcript');
+        return transcribeAudioMock();
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.webm');
+        formData.append('model_id', 'scribe_v1');
+
+        const response = await fetch(`${ELEVENLABS_API_BASE}/v1/speech-to-text`, {
+            method: 'POST',
+            headers: { 'xi-api-key': apiKey },
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text().catch(() => 'Unable to read response');
+            log.error('ElevenLabs STT returned non-OK', {
+                status: response.status,
+                body: errorBody,
+            });
+            return transcribeAudioMock();
+        }
+
+        const data = await response.json();
+        return {
+            transcript: data.text ?? '',
+            confidence: data.confidence ?? 0.95,
+            durationSec: data.duration ?? 0,
+            isLive: true,
+        };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown ElevenLabs error';
+        log.error('transcribeAudioLive failed', { error: message });
+        return transcribeAudioMock();
+    }
+}
+
 // ─── Transcript → FHIR Observation ──────────────────────────────────────────
 
 /**
@@ -313,9 +367,9 @@ export async function processScribeObservation(
     audioBlob: Blob | null = null,
     patientRef = 'Patient/patient-001',
 ): Promise<ScribeObservationResult> {
-    // Step 1: Transcribe
+    // Step 1: Transcribe (live via ElevenLabs, or mock fallback)
     const transcription = audioBlob
-        ? await transcribeAudio(audioBlob)
+        ? await transcribeAudioLive(audioBlob)
         : await transcribeAudioMock();
 
     log.info('Voice scribe transcription complete', {

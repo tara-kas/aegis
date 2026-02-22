@@ -48,3 +48,8 @@ export function isMockOnly(): boolean {
 export function isLiveOnly(): boolean {
     return getDataMode() === 'live';
 }
+
+/** True when VITE_DATA_MODE is explicitly set to 'live'. Falls back to false (mock) if missing. */
+export function isLiveMode(): boolean {
+    return getDataMode() === 'live';
+}
