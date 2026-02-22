@@ -14,6 +14,10 @@ build/
 *.lock
 bun.lockb
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Vitest results cache
 node_modules/.vite/
 

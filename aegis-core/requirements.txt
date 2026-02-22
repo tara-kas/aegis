@@ -1,0 +1,12 @@
+webots-python-controller
+openai
+python-dotenv
+transformers
+torch
+pydicom
+pillow
+numpy
+supabase
+httpx
+pytest
+python-dateutil
