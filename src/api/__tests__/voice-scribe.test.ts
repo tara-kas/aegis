@@ -5,7 +5,7 @@
  *   1. Mock ElevenLabs transcript is returned correctly
  *   2. Transcript parses into a valid FHIR R4 Observation
  *   3. Observation passes validateFhirResource()
- *   4. Paid.ai billing trace fires with $125.00 and correct workflowId
+ *   4. Paid.ai billing trace fires with €125.00 and correct workflowId
  *   5. Vital sign extraction works for known clinical patterns
  */
 
@@ -182,7 +182,7 @@ describe('Medical Voice Scribe', () => {
     // ─── End-to-End Pipeline with Billing ───────────────────────────────────
 
     describe('processScribeObservation() — full pipeline', () => {
-        it('should transcribe, parse, validate, and bill at $125.00', async () => {
+        it('should transcribe, parse, validate, and bill at €125.00', async () => {
             const result = await processScribeObservation(null);
 
             // Transcript was captured
@@ -206,7 +206,7 @@ describe('Medical Voice Scribe', () => {
             expect(result.billing.trace.workflowId).toBe('autonomous_scribe_observation');
         });
 
-        it('should record exactly $0.006 as the elevenLabsVoice cost', () => {
+        it('should record exactly €0.006 as the elevenLabsVoice cost', () => {
             expect(SCRIBE_COSTS.elevenLabsVoice).toBe(0.006);
         });
 
@@ -252,11 +252,11 @@ describe('Medical Voice Scribe', () => {
             expect(SCRIBE_WORKFLOW_ID).toBe('autonomous_scribe_observation');
         });
 
-        it('should bill exactly $125.00', () => {
+        it('should bill exactly €125.00', () => {
             expect(SCRIBE_BILLED_AMOUNT).toBe(125.00);
         });
 
-        it('should have elevenLabsVoice cost of $0.006', () => {
+        it('should have elevenLabsVoice cost of €0.006', () => {
             expect(SCRIBE_COSTS.elevenLabsVoice).toBe(0.006);
         });
     });

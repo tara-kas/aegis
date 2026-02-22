@@ -270,7 +270,7 @@ describe('VoiceScribeWidget', () => {
 
   // ── Billing trace fires to trace store ─────────────────────────
 
-  it('should record a $125 trace in the trace store for FinancialDashboard', async () => {
+  it('should record a €125 trace in the trace store for FinancialDashboard', async () => {
     renderWidget();
     const btn = screen.getByTestId('scribe-mic-button');
 
@@ -362,6 +362,6 @@ describe('VoiceScribeWidget', () => {
 
     // The mock transcript contains "heart rate" and "110 bpm"
     expect(screen.getByTestId('scribe-result').textContent).toContain('110');
-    expect(screen.getByTestId('scribe-result').textContent).toContain('$125.00');
+    expect(screen.getByTestId('scribe-result').textContent).toContain('€125.00');
   });
 });

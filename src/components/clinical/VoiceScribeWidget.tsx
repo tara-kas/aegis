@@ -13,7 +13,7 @@
  *   3. Calls processScribeObservation(audioBlob) which internally:
  *      a. transcribeAudioLive(audioBlob) → ElevenLabs STT (or mock fallback)
  *      b. transcriptToFhirObservation() → FHIR R4 Observation
- *      c. traceObservationWorkflow() → Paid.ai $125.00 trace
+ *      c. traceObservationWorkflow() → Paid.ai €125.00 trace
  *   4. On success: toast notification, fires onObservationCreated
  *      so the parent ClinicalDashboard surfaces the observation
  *      and the FinancialDashboard picks up the billing trace
@@ -31,6 +31,7 @@ import {
   type ScribeObservationResult,
 } from '@/api/voice-scribe';
 import { cn } from '@/lib/utils';
+import { generateClinicalNotePDF } from '@/utils/pdfGenerator';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
         streamRef.current = null;
         mediaRecorderRef.current = null;
 
-        // Run the full pipeline: transcribeAudioLive → FHIR → Paid.ai $125
+        // Run the full pipeline: transcribeAudioLive → FHIR → Paid.ai €125
         const result = await processScribeObservation(audioBlob);
 
         setLastResult(result);
@@ -159,9 +160,19 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
             ? `${result.observation.valueQuantity.value} ${result.observation.valueQuantity.unit}`
             : result.observation.valueString ?? 'Clinical note';
 
+        // Generate and download the clinical note PDF
+        const geminiSummary = result.geminiInsights
+          ? `${result.geminiInsights.procedure} (value: ${result.geminiInsights.fhirObservationValue})`
+          : vitalDisplay;
+        generateClinicalNotePDF(
+          result.transcript,
+          geminiSummary,
+          result.billing.trace.traceId,
+        );
+
         toast({
           title: '✅ Voice Scribe — Observation Created',
-          description: `"${result.transcript.slice(0, 80)}…" — Vital: ${vitalDisplay} — Billed: $${SCRIBE_BILLED_AMOUNT.toFixed(2)} via Paid.ai`,
+          description: `"${result.transcript.slice(0, 80)}…" — Vital: ${vitalDisplay} — Billed: €${SCRIBE_BILLED_AMOUNT.toFixed(2)} via Paid.ai`,
         });
 
         // Notify parent so ClinicalDashboard can surface the observation
@@ -246,7 +257,7 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
                   : lastResult.observation.valueString ?? '—'}
               </span>
               <span className="font-mono text-green-600 dark:text-green-400">
-                ${lastResult.billing.trace.billedAmount.toFixed(2)}
+                €{SCRIBE_BILLED_AMOUNT.toFixed(2)}
               </span>
             </div>
             <p className="text-[10px] text-muted-foreground/60">

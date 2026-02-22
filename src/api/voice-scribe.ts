@@ -7,14 +7,14 @@
  *   1. Transcribes audio via the ElevenLabs speech-to-text API
  *   2. Parses the clinical transcript into a strict FHIR R4 Observation
  *   3. Routes the observation through the Paid.ai billing pipeline
- *      using the `autonomous_scribe_observation` pricing trigger ($125.00)
+ *      using the `autonomous_scribe_observation` pricing trigger (€125.00)
  *
  * Hackathon fallback:
  *   • `transcribeAudioMock()` returns a realistic surgical transcript
  *     so the full pipeline can be demonstrated without a live mic input.
  *
  * Cost structure:
- *   ElevenLabs Scribe v2 ≈ $0.006 per request (average 30s clip)
+ *   ElevenLabs Scribe v2 ≈ €0.006 per request (average 30s clip)
  */
 
 import type { FhirObservation } from './fhir';
@@ -38,10 +38,10 @@ function getElevenLabsApiKey(): string | undefined {
 
 // ─── Billing Constants ───────────────────────────────────────────────────────
 
-/** Workflow ID that maps to the $125 Paid.ai pricing trigger */
+/** Workflow ID that maps to the €125 Paid.ai pricing trigger */
 export const SCRIBE_WORKFLOW_ID = 'autonomous_scribe_observation';
 
-/** Fixed billed amount for an autonomous scribe observation ($125.00) */
+/** Fixed billed amount for an autonomous scribe observation (€125.00) */
 export const SCRIBE_BILLED_AMOUNT = 125.00;
 
 /** Cost breakdown for a single scribe observation */
@@ -302,6 +302,7 @@ export async function transcribeAudioLive(audioBlob: Blob): Promise<TranscribeRe
                 status: response.status,
                 body: errorBody,
             });
+            console.error('VOICE SCRIBE CRASH REASON: ElevenLabs returned', response.status, errorBody);
             return transcribeAudioMock();
         }
 
@@ -315,6 +316,7 @@ export async function transcribeAudioLive(audioBlob: Blob): Promise<TranscribeRe
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown ElevenLabs error';
         log.error('transcribeAudioLive failed', { error: message });
+        console.error('VOICE SCRIBE CRASH REASON:', err);
         return transcribeAudioMock();
     }
 }
@@ -322,7 +324,7 @@ export async function transcribeAudioLive(audioBlob: Blob): Promise<TranscribeRe
 // ─── Google Gemini Clinical Analysis ─────────────────────────────────────────
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_MODEL = 'gemini-1.5-pro';
+const GEMINI_MODEL = 'gemini-2.0-flash';
 
 /** Read the Google Gemini API key from the environment. */
 function getGeminiApiKey(): string | undefined {
@@ -370,14 +372,15 @@ export async function analyzeWithGemini(transcript: string): Promise<GeminiInsig
                 status: response.status,
                 body: errorBody,
             });
+            console.error('VOICE SCRIBE CRASH REASON: Gemini returned', response.status, errorBody);
             return null;
         }
 
         const data = await response.json();
         const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
-        // Strip any accidental markdown fences Gemini may add
-        const cleaned = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        // Aggressively strip any markdown fencing Gemini may add
+        const cleaned = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
 
         const parsed = JSON.parse(cleaned) as GeminiInsights;
 
@@ -397,6 +400,7 @@ export async function analyzeWithGemini(transcript: string): Promise<GeminiInsig
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown Gemini error';
         log.error('analyzeWithGemini failed', { error: message });
+        console.error('VOICE SCRIBE CRASH REASON:', err);
         return null;
     }
 }
@@ -479,7 +483,7 @@ export function transcriptToFhirObservation(
  * End-to-end voice scribe pipeline:
  *   1. Transcribe audio (live or mock)
  *   2. Parse transcript → FHIR Observation
- *   3. Bill via `traceObservationWorkflow` at $125.00 (`autonomous_scribe_observation`)
+ *   3. Bill via `traceObservationWorkflow` at €125.00 (`autonomous_scribe_observation`)
  *
  * @param audioBlob   — raw audio; if `null`, uses the mock transcript
  * @param patientRef  — FHIR Patient reference
@@ -525,7 +529,7 @@ export async function processScribeObservation(
         }
     }
 
-    // Step 3: Bill via Paid.ai ($125.00, autonomous_scribe_observation)
+    // Step 3: Bill via Paid.ai (€125.00, autonomous_scribe_observation)
     const billing = await traceObservationWorkflow({
         workflowId: SCRIBE_WORKFLOW_ID,
         observation,

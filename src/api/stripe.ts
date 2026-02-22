@@ -9,7 +9,7 @@
  * CRITICAL SECURITY REQUIREMENTS:
  * 1. Payment credentials of the buying institution are NEVER exposed in payloads
  * 2. Checkout sessions are strictly scoped to exact cart total
- * 3. Hard-coded $1000 limit enforced at application layer
+ * 3. Hard-coded €1000 limit enforced at application layer
  * 
  * Hackathon Logic:
  * - Uses Stripe Test Mode (sk_test_...)
@@ -26,7 +26,7 @@ import { logger } from '../utils/logger';
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /** Hard-coded maximum amount (in cents) for autonomous agent purchases */
-export const MAX_AUTONOMOUS_PURCHASE_CENTS = 100000; // $1000.00
+export const MAX_AUTONOMOUS_PURCHASE_CENTS = 100000; // €1000.00
 
 /** Stripe API version */
 const STRIPE_API_VERSION = '2024-11-20.acacia';
@@ -117,7 +117,7 @@ export interface CompleteCheckoutResponse {
  * Validates that a checkout request complies with all security constraints.
  * 
  * FAILSAFE CHECK 1: Ensures payment credentials are never in the payload
- * FAILSAFE CHECK 2: Enforces strict $1000 limit
+ * FAILSAFE CHECK 2: Enforces strict €1000 limit
  */
 export function validateCheckoutRequest(request: CreateCheckoutRequest): {
     valid: boolean;
@@ -135,14 +135,14 @@ export function validateCheckoutRequest(request: CreateCheckoutRequest): {
         }
     }
 
-    // Calculate total and enforce $1000 limit
+    // Calculate total and enforce €1000 limit
     const totalCents = request.lineItems.reduce((sum, item) => {
         return sum + (item.amountCents * item.quantity);
     }, 0);
 
     if (totalCents > MAX_AUTONOMOUS_PURCHASE_CENTS) {
         errors.push(
-            `Amount exceeds autonomous purchase limit: $${(totalCents / 100).toFixed(2)} > $${(MAX_AUTONOMOUS_PURCHASE_CENTS / 100).toFixed(2)}`
+            `Amount exceeds autonomous purchase limit: €${(totalCents / 100).toFixed(2)} > €${(MAX_AUTONOMOUS_PURCHASE_CENTS / 100).toFixed(2)}`
         );
     }
 

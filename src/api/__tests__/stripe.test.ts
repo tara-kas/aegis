@@ -3,7 +3,7 @@
  * 
  * These tests verify:
  * 1. FAILSAFE CHECK 1: Payment credentials are never exposed in payloads
- * 2. FAILSAFE CHECK 2: $1000 limit is strictly enforced
+ * 2. FAILSAFE CHECK 2: €1000 limit is strictly enforced
  * 3. Checkout Session URL is correctly returned
  * 4. Validation logic prevents malformed requests
  * 
@@ -30,13 +30,13 @@ const mockConfig: StripeEnvironmentConfig = {
 const validLineItems: LineItem[] = [
     {
         description: 'AWS Cloud Compute - Pre-operative Planning',
-        amountCents: 50000, // $500
+        amountCents: 50000, // €500
         quantity: 1,
         sku: 'CLOUD-COMPUTE-001',
     },
     {
         description: 'Disposable Robotic Attachment - Da Vinci Tool',
-        amountCents: 25000, // $250
+        amountCents: 25000, // €250
         quantity: 2,
         sku: 'ROBOT-ATTACH-DV-002',
     },
@@ -84,13 +84,13 @@ describe('Stripe ACP Module', () => {
             expect(result.errors).toHaveLength(0);
         });
 
-        it('FAILSAFE CHECK 2: should reject requests exceeding $1000 limit', () => {
+        it('FAILSAFE CHECK 2: should reject requests exceeding €1000 limit', () => {
             const overLimitRequest: CreateCheckoutRequest = {
                 ...validCheckoutRequest,
                 lineItems: [
                     {
                         description: 'Expensive Cloud Cluster',
-                        amountCents: 150000, // $1500 - exceeds $1000 limit
+                        amountCents: 150000, // €1500 - exceeds €1000 limit
                         quantity: 1,
                     },
                 ],
@@ -99,17 +99,17 @@ describe('Stripe ACP Module', () => {
             const result = validateCheckoutRequest(overLimitRequest);
             expect(result.valid).toBe(false);
             expect(result.errors).toContain(
-                'Amount exceeds autonomous purchase limit: $1500.00 > $1000.00'
+                'Amount exceeds autonomous purchase limit: €1500.00 > €1000.00'
             );
         });
 
-        it('FAILSAFE CHECK 2: should accept requests exactly at $1000 limit', () => {
+        it('FAILSAFE CHECK 2: should accept requests exactly at €1000 limit', () => {
             const atLimitRequest: CreateCheckoutRequest = {
                 ...validCheckoutRequest,
                 lineItems: [
                     {
                         description: 'Maximum Allowed Purchase',
-                        amountCents: MAX_AUTONOMOUS_PURCHASE_CENTS, // Exactly $1000
+                        amountCents: MAX_AUTONOMOUS_PURCHASE_CENTS, // Exactly €1000
                         quantity: 1,
                     },
                 ],
@@ -124,11 +124,11 @@ describe('Stripe ACP Module', () => {
             const multiItemRequest: CreateCheckoutRequest = {
                 ...validCheckoutRequest,
                 lineItems: [
-                    { description: 'Item A', amountCents: 40000, quantity: 2 }, // $800
-                    { description: 'Item B', amountCents: 20100, quantity: 1 }, // $201
+                    { description: 'Item A', amountCents: 40000, quantity: 2 }, // €800
+                    { description: 'Item B', amountCents: 20100, quantity: 1 }, // €201
                 ],
             };
-            // Total: $1001 - should fail
+            // Total: €1001 - should fail
 
             const result = validateCheckoutRequest(multiItemRequest);
             expect(result.valid).toBe(false);
@@ -262,7 +262,7 @@ describe('Stripe ACP Module', () => {
             expect(response.checkoutSessionId).toBe('cs_test_mock_checkout_session_123');
         });
 
-        it('CRITICAL TEST: should return valid checkout URL with $1000 limit enforced', async () => {
+        it('CRITICAL TEST: should return valid checkout URL with €1000 limit enforced', async () => {
             fetchMock.mockResolvedValueOnce({
                 ok: true,
                 status: 200,
@@ -290,7 +290,7 @@ describe('Stripe ACP Module', () => {
             expect(response.checkoutUrl).toBeTruthy();
             expect(response.amountCents).toBe(MAX_AUTONOMOUS_PURCHASE_CENTS);
 
-            // Verify the session was created for exactly $1000
+            // Verify the session was created for exactly €1000
             expect(response.amountCents).toBe(100000);
         });
 
@@ -339,7 +339,7 @@ describe('Stripe ACP Module', () => {
                 lineItems: [
                     {
                         description: 'Too Expensive',
-                        amountCents: 200000, // $2000
+                        amountCents: 200000, // €2000
                         quantity: 1,
                     },
                 ],
@@ -470,7 +470,7 @@ describe('Stripe ACP Module', () => {
                 lineItems: [
                     {
                         description: 'Crusoe Cloud GPU Cluster - 2 hours',
-                        amountCents: 75000, // $750
+                        amountCents: 75000, // €750
                         quantity: 1,
                         sku: 'CRUSOE-GPU-H100',
                     },
@@ -538,8 +538,8 @@ describe('Stripe ACP Module', () => {
                 lineItems: [
                     {
                         description: 'Cheap item with high quantity',
-                        amountCents: 1, // $0.01
-                        quantity: 10_000_001, // Total = $100,000.01 — exceeds limit
+                        amountCents: 1, // €0.01
+                        quantity: 10_000_001, // Total = €100,000.01 — exceeds limit
                     },
                 ],
             };
