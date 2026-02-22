@@ -13,6 +13,20 @@ const SEVERITY_CONFIG = {
   info: { icon: Info, bg: 'bg-clinical-blue/10 border-clinical-blue/40', text: 'text-clinical-blue', badge: 'bg-clinical-blue' },
 };
 
+// Distinct colour palette so concurrent patients' alerts are visually distinguishable
+const PATIENT_COLOURS: Record<string, { ring: string; dot: string; label: string }> = {
+  'patient-001': { ring: 'ring-sky-400/60', dot: 'bg-sky-400', label: 'P1 · Nakamura' },
+  'patient-002': { ring: 'ring-amber-400/60', dot: 'bg-amber-400', label: 'P2 · O\u2019Brien' },
+  'patient-003': { ring: 'ring-emerald-400/60', dot: 'bg-emerald-400', label: 'P3 · M\u00fcller' },
+};
+
+const DEFAULT_PATIENT_COLOUR = { ring: 'ring-violet-400/60', dot: 'bg-violet-400', label: '' };
+
+function patientColour(id?: string) {
+  if (!id) return null;
+  return PATIENT_COLOURS[id] ?? { ...DEFAULT_PATIENT_COLOUR, label: id.replace('patient-', 'P') };
+}
+
 function formatTimestamp(ts: string): string {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
@@ -27,18 +41,25 @@ export function AnomalyAlertBanner({ alerts, onDismiss, onAcknowledge }: Anomaly
       {active.slice(0, 5).map((alert) => {
         const config = SEVERITY_CONFIG[alert.severity];
         const Icon = config.icon;
+        const pc = patientColour(alert.patientId);
 
         return (
           <div
             key={alert.id}
-            className={`${config.bg} border rounded-lg p-3 flex items-start gap-3`}
+            className={`${config.bg} border rounded-lg p-3 flex items-start gap-3 ${pc ? `ring-2 ${pc.ring}` : ''}`}
           >
             <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${config.text}`} />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-xs font-bold uppercase px-1.5 py-0.5 rounded ${config.badge} text-white`}>
                   {alert.severity}
                 </span>
+                {pc && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
+                    <span className={`inline-block w-2 h-2 rounded-full ${pc.dot}`} />
+                    {pc.label}
+                  </span>
+                )}
                 <span className={`font-medium text-sm ${config.text}`}>{alert.title}</span>
                 <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">{formatTimestamp(alert.timestamp)}</span>
               </div>

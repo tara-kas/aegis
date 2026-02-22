@@ -29,7 +29,7 @@ export function ClinicalDashboard() {
   // Determine active OR based on patient ID (simplistic mapping for simulation)
   const activeDevice = activePatientId === 'patient-002' ? 'robot-arm-002' : 'robot-arm-001';
 
-  const { vitals, alerts, latestFrame, connectionStatus, acknowledgeAlert, dismissAlert, isStreaming, startStream, stopStream } = useTelemetry({ deviceId: activeDevice });
+  const { vitals, alerts, latestFrame, connectionStatus, acknowledgeAlert, dismissAlert, isStreaming, startStream, stopStream } = useTelemetry({ deviceId: activeDevice, patientId: activePatientId });
 
   const [scribeObservations, setScribeObservations] = useState<FhirObservation[]>([]);
 
@@ -167,10 +167,13 @@ export function ClinicalDashboard() {
         <div className="col-span-4 flex flex-col gap-6">
           <TelemetryPanel deviceId={activeDevice} latestFrame={latestFrame} connectionStatus={connectionStatus} />
         </div>
-        <div className="col-span-4 space-y-6">
+        <div className="col-span-4">
           <VoiceScribeWidget onObservationCreated={handleScribeObservation} />
-          <EncounterTimeline encounters={mockEncounters} procedures={mockProcedures} />
         </div>
+      </div>
+
+      <div className="lg:col-span-3">
+        <EncounterTimeline encounters={mockEncounters} procedures={mockProcedures} />
       </div>
     </div>
   );

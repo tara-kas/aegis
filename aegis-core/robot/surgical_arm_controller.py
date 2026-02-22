@@ -11,7 +11,8 @@ Breathing compensation:
   robot actively compensating for the patient's respiratory motion.
 
 Telemetry is POST-ed every 500 ms, including a stochastic anomaly flag that fires
-~5 % of the time so the front-end alert pipeline can be exercised.
+~0.5 % of the time (with a 12-second cooldown) so the front-end alert pipeline
+can be exercised without flooding the UI.
 """
 import sys
 import os
@@ -68,7 +69,10 @@ BREATHING_FREQ_HZ = 0.25
 BREATHING_AMPLITUDE_RAD = 0.008  # maps to ~2 mm at the wrist
 
 # Random anomaly injection probability (per telemetry tick)
-RANDOM_ANOMALY_PROBABILITY = 0.05
+RANDOM_ANOMALY_PROBABILITY = 0.005
+
+# Cooldown: minimum seconds between any two anomaly triggers
+ANOMALY_COOLDOWN_SECONDS = 30.0
 
 # Fixed telemetry cadence for the demo (overrides env default)
 TELEMETRY_SEND_INTERVAL_MS = 500
@@ -116,6 +120,12 @@ class SurgicalArmController:
         # Previous end effector position for anomaly detection
         self.previous_end_effector_xyz: Optional[List[float]] = None
 
+        # Anomaly cooldown tracker (sim-time of last anomaly)
+        self.last_anomaly_time: float = -ANOMALY_COOLDOWN_SECONDS
+
+        # One-shot flag: ensures anomaly_detected=True is emitted for exactly one POST
+        self._anomaly_emitted = False
+
         # Log file path
         self.log_file = "logs/telemetry.jsonl"
 
@@ -129,7 +139,8 @@ class SurgicalArmController:
 
         print("[CONTROLLER] UR5e motors and sensors initialised successfully")
         print(f"[CONTROLLER] Telemetry interval: {TELEMETRY_SEND_INTERVAL_MS} ms")
-        print(f"[CONTROLLER] Random anomaly probability: {RANDOM_ANOMALY_PROBABILITY * 100:.0f}%")
+        print(f"[CONTROLLER] Random anomaly probability: {RANDOM_ANOMALY_PROBABILITY * 100:.1f}%")
+        print(f"[CONTROLLER] Anomaly cooldown: {ANOMALY_COOLDOWN_SECONDS:.0f}s")
 
     # ─── Surgical trajectory generation ───────────────────────────────────
 
@@ -344,17 +355,24 @@ class SurgicalArmController:
         end_effector_xyz: List[float]
     ) -> Tuple[bool, Optional[str]]:
         """
-        Run local anomaly detection, plus a stochastic 5% random trigger.
+        Run local anomaly detection, plus a stochastic 0.5% random trigger.
 
-        The random trigger ensures the UI alert pipeline is exercised
-        during every demo, regardless of how gentle the trajectory is.
+        A cooldown of ANOMALY_COOLDOWN_SECONDS prevents back-to-back
+        anomalies from flooding the dashboard.  The random trigger ensures
+        the UI alert pipeline is exercised during every demo, regardless
+        of how gentle the trajectory is.
 
         Returns:
             (anomaly_detected: bool, anomaly_reason: str or None)
         """
+        # ── Cooldown guard: suppress if too recent ────────────────────
+        if (self.t - self.last_anomaly_time) < ANOMALY_COOLDOWN_SECONDS:
+            return False, None
+
         # 1. Physics-based: velocity threshold
         for i, velocity in enumerate(joint_velocities):
             if abs(velocity) > ANOMALY_VELOCITY_THRESHOLD:
+                self.last_anomaly_time = self.t
                 return True, (
                     f"{MOTOR_NAMES[i]} velocity {velocity:.3f} rad/s "
                     f"exceeds threshold {ANOMALY_VELOCITY_THRESHOLD} rad/s"
@@ -366,14 +384,16 @@ class SurgicalArmController:
                 deviation = abs(current - previous)
                 if deviation > ANOMALY_POSITION_THRESHOLD:
                     axis_name = ["X", "Y", "Z"][i]
+                    self.last_anomaly_time = self.t
                     return True, (
                         f"End effector {axis_name} deviation {deviation:.4f} m "
                         f"exceeds threshold {ANOMALY_POSITION_THRESHOLD} m"
                     )
 
-        # 3. Stochastic: 5% random anomaly for demo/testing
+        # 3. Stochastic: 0.5% random anomaly for demo/testing
         if random.random() < RANDOM_ANOMALY_PROBABILITY:
             reason = random.choice(RANDOM_ANOMALY_REASONS)
+            self.last_anomaly_time = self.t
             return True, reason
 
         return False, None
@@ -393,6 +413,19 @@ class SurgicalArmController:
             joint_velocities,
             end_effector_xyz
         )
+
+        # One-shot enforcement: emit anomaly_detected=True for exactly ONE
+        # telemetry POST, then force False for the rest of the cooldown.
+        if anomaly_detected:
+            if self._anomaly_emitted:
+                anomaly_detected = False
+                anomaly_reason = None
+            else:
+                self._anomaly_emitted = True
+                print(f"[ANOMALY] t={self.t:.1f}s — {anomaly_reason}")
+        # Reset the one-shot latch when cooldown expires
+        if (self.t - self.last_anomaly_time) >= ANOMALY_COOLDOWN_SECONDS:
+            self._anomaly_emitted = False
 
         self.previous_end_effector_xyz = end_effector_xyz[:]
 

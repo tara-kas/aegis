@@ -11,6 +11,73 @@ import type { VitalSign, AnomalyAlert, KinematicFrame, JointAngle } from '../typ
 import type { MarginData, SolanaTransaction, ACPStatus, SharedPaymentToken, SubscriptionSummary, RevenueDataPoint, PaidAiTrace } from '../types/financial';
 import type { ComplianceItem, Incident, AuditEntry } from '../types/compliance';
 
+// ─── Per-Patient Baseline Profiles ──────────────────────────────────────────
+// Each profile defines clinically distinct baselines so concurrent surgeries
+// look visibly different on the dashboard.  Profiles are keyed by patient ID;
+// unknown patients get a deterministic pseudo-random baseline derived from
+// a simple hash of their ID.
+
+interface VitalBaseline {
+  heartRate: number;        // bpm
+  spo2: number;             // %
+  systolicBP: number;       // mmHg
+  diastolicBP: number;      // mmHg
+  etco2: number;            // mmHg
+  respRate: number;         // /min
+  temperature: number;      // °C
+}
+
+const PATIENT_BASELINES: Record<string, VitalBaseline> = {
+  // Patient A — stable, low-normal heart rate (65-70 bpm)
+  'patient-001': { heartRate: 67, spo2: 99, systolicBP: 112, diastolicBP: 72, etco2: 37, respRate: 13, temperature: 36.6 },
+  // Patient B — tachycardia risk, elevated HR (110-115 bpm), lower SpO₂
+  'patient-002': { heartRate: 112, spo2: 95, systolicBP: 145, diastolicBP: 88, etco2: 41, respRate: 18, temperature: 37.1 },
+  // Patient C — moderate, slightly elevated (85-90 bpm)
+  'patient-003': { heartRate: 87, spo2: 97, systolicBP: 128, diastolicBP: 80, etco2: 39, respRate: 15, temperature: 36.8 },
+};
+
+/** Simple string hash → deterministic number 0–1 for unknown patients */
+function hashPatientId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h % 1000) / 1000;
+}
+
+/** Derive a plausible baseline from a patient hash */
+function deriveBaseline(id: string): VitalBaseline {
+  const h = hashPatientId(id);
+  return {
+    heartRate: 60 + Math.round(h * 55),           // 60–115 bpm
+    spo2: 95 + Math.round(h * 4),             // 95–99 %
+    systolicBP: 100 + Math.round(h * 50),           // 100–150 mmHg
+    diastolicBP: 62 + Math.round(h * 28),           // 62–90 mmHg
+    etco2: 35 + Math.round(h * 10),            // 35–45 mmHg
+    respRate: 12 + Math.round(h * 8),             // 12–20 /min
+    temperature: 36.2 + Math.round(h * 10) / 10,     // 36.2–37.2 °C
+  };
+}
+
+function getBaseline(patientId: string): VitalBaseline {
+  return PATIENT_BASELINES[patientId] ?? deriveBaseline(patientId);
+}
+
+/** Build a VitalSign[] array with patient-specific baselines */
+export function getPatientVitalSigns(patientId: string): VitalSign[] {
+  const b = getBaseline(patientId);
+  const ts = new Date().toISOString();
+  return [
+    { code: '8867-4', display: 'Heart Rate', value: b.heartRate, unit: 'bpm', normalRange: { low: 60, high: 100 }, trend: 'stable', timestamp: ts },
+    { code: '2708-6', display: 'SpO₂', value: b.spo2, unit: '%', normalRange: { low: 95, high: 100 }, trend: 'stable', timestamp: ts },
+    { code: '8480-6', display: 'Systolic BP', value: b.systolicBP, unit: 'mmHg', normalRange: { low: 90, high: 140 }, trend: 'stable', timestamp: ts },
+    { code: '8462-4', display: 'Diastolic BP', value: b.diastolicBP, unit: 'mmHg', normalRange: { low: 60, high: 90 }, trend: 'stable', timestamp: ts },
+    { code: '19889-5', display: 'EtCO₂', value: b.etco2, unit: 'mmHg', normalRange: { low: 35, high: 45 }, trend: 'stable', timestamp: ts },
+    { code: '9279-1', display: 'Resp Rate', value: b.respRate, unit: '/min', normalRange: { low: 12, high: 20 }, trend: 'stable', timestamp: ts },
+    { code: '8310-5', display: 'Temperature', value: b.temperature, unit: '°C', normalRange: { low: 36.1, high: 37.2 }, trend: 'stable', timestamp: ts },
+  ];
+}
+
 // ─── Number of Patients Seed ────────────────────────────────────────────────
 const TOTAL_GENERATED_PATIENTS = Math.floor(Math.random() * 21) + 20; // 20 to 40
 
@@ -172,7 +239,11 @@ function generateObservationsForActiveEncounters(encounters: FhirEncounter[]): F
     const patientRef = enc.subject.reference;
     const baseDate = new Date().toISOString();
 
-    // Heart Rate
+    // Derive patient-specific baselines for observation generation
+    const patientId = patientRef.replace('Patient/', '');
+    const baseline = getBaseline(patientId);
+
+    // Heart Rate — uses patient-specific baseline
     observations.push({
       resourceType: 'Observation',
       id: `obs-hr-gen-${obsCounter++}`,
@@ -183,11 +254,11 @@ function generateObservationsForActiveEncounters(encounters: FhirEncounter[]): F
       subject: { reference: patientRef },
       encounter: { reference: `Encounter/${enc.id}` },
       effectiveDateTime: baseDate,
-      valueQuantity: { value: 65 + Math.floor(Math.random() * 30), unit: 'beats/minute', system: 'http://unitsofmeasure.org', code: '/min' },
+      valueQuantity: { value: baseline.heartRate + Math.floor(Math.random() * 10) - 5, unit: 'beats/minute', system: 'http://unitsofmeasure.org', code: '/min' },
       referenceRange: [{ low: { value: 60, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' }, high: { value: 100, unit: '/min', system: 'http://unitsofmeasure.org', code: '/min' } }],
     });
 
-    // SpO2
+    // SpO2 — uses patient-specific baseline
     observations.push({
       resourceType: 'Observation',
       id: `obs-spo2-gen-${obsCounter++}`,
@@ -198,11 +269,11 @@ function generateObservationsForActiveEncounters(encounters: FhirEncounter[]): F
       subject: { reference: patientRef },
       encounter: { reference: `Encounter/${enc.id}` },
       effectiveDateTime: baseDate,
-      valueQuantity: { value: 95 + Math.floor(Math.random() * 5), unit: '%', system: 'http://unitsofmeasure.org', code: '%' },
+      valueQuantity: { value: baseline.spo2 + Math.floor(Math.random() * 3) - 1, unit: '%', system: 'http://unitsofmeasure.org', code: '%' },
       referenceRange: [{ low: { value: 95, unit: '%', system: 'http://unitsofmeasure.org', code: '%' }, high: { value: 100, unit: '%', system: 'http://unitsofmeasure.org', code: '%' } }],
     });
 
-    // Blood Pressure Panel
+    // Blood Pressure Panel — uses patient-specific baseline
     observations.push({
       resourceType: 'Observation',
       id: `obs-bp-gen-${obsCounter++}`,
@@ -214,8 +285,8 @@ function generateObservationsForActiveEncounters(encounters: FhirEncounter[]): F
       encounter: { reference: `Encounter/${enc.id}` },
       effectiveDateTime: baseDate,
       component: [
-        { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }] }, valueQuantity: { value: 110 + Math.floor(Math.random() * 20), unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
-        { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }] }, valueQuantity: { value: 70 + Math.floor(Math.random() * 15), unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
+        { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }] }, valueQuantity: { value: baseline.systolicBP + Math.floor(Math.random() * 10) - 5, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
+        { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }] }, valueQuantity: { value: baseline.diastolicBP + Math.floor(Math.random() * 8) - 4, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
       ],
     });
 
@@ -325,16 +396,8 @@ export const mockProcedures: FhirProcedure[] = [
 ];
 
 // ─── Vital Signs Stream ─────────────────────────────────────────────────────
-
-export const mockVitalSigns: VitalSign[] = [
-  { code: '8867-4', display: 'Heart Rate', value: 72, unit: 'bpm', normalRange: { low: 60, high: 100 }, trend: 'stable', timestamp: '2026-02-21T09:15:00Z' },
-  { code: '2708-6', display: 'SpO₂', value: 98, unit: '%', normalRange: { low: 95, high: 100 }, trend: 'stable', timestamp: '2026-02-21T09:15:00Z' },
-  { code: '8480-6', display: 'Systolic BP', value: 118, unit: 'mmHg', normalRange: { low: 90, high: 140 }, trend: 'stable', timestamp: '2026-02-21T09:15:00Z' },
-  { code: '8462-4', display: 'Diastolic BP', value: 76, unit: 'mmHg', normalRange: { low: 60, high: 90 }, trend: 'stable', timestamp: '2026-02-21T09:15:00Z' },
-  { code: '19889-5', display: 'EtCO₂', value: 37, unit: 'mmHg', normalRange: { low: 35, high: 45 }, trend: 'stable', timestamp: '2026-02-21T09:15:00Z' },
-  { code: '9279-1', display: 'Resp Rate', value: 14, unit: '/min', normalRange: { low: 12, high: 20 }, trend: 'stable', timestamp: '2026-02-21T09:15:00Z' },
-  { code: '8310-5', display: 'Temperature', value: 36.7, unit: '°C', normalRange: { low: 36.1, high: 37.2 }, trend: 'stable', timestamp: '2026-02-21T09:15:00Z' },
-];
+// Default export for backward compatibility (patient-001 baseline)
+export const mockVitalSigns: VitalSign[] = getPatientVitalSigns('patient-001');
 
 // ─── Anomaly Alerts ─────────────────────────────────────────────────────────
 
@@ -347,9 +410,10 @@ export const mockAnomalyAlerts: AnomalyAlert[] = [
     metric: 'heart-rate',
     currentValue: 95,
     threshold: 100,
-    timestamp: '2026-02-21T09:12:00Z',
+    timestamp: new Date(Date.now() - 3 * 60_000).toISOString(),
     acknowledged: false,
     source: 'vitals',
+    patientId: 'patient-002',
   },
   {
     id: 'alert-002',
@@ -359,9 +423,10 @@ export const mockAnomalyAlerts: AnomalyAlert[] = [
     metric: 'joint-deviation',
     currentValue: 12.3,
     threshold: 5.0,
-    timestamp: '2026-02-21T09:10:00Z',
+    timestamp: new Date(Date.now() - 5 * 60_000).toISOString(),
     acknowledged: false,
     source: 'telemetry',
+    patientId: 'patient-001',
   },
   {
     id: 'alert-003',
@@ -371,9 +436,10 @@ export const mockAnomalyAlerts: AnomalyAlert[] = [
     metric: 'inference-latency',
     currentValue: 340,
     threshold: 200,
-    timestamp: '2026-02-21T09:08:00Z',
+    timestamp: new Date(Date.now() - 7 * 60_000).toISOString(),
     acknowledged: true,
     source: 'inference',
+    patientId: 'patient-002',
   },
 ];
 
@@ -391,14 +457,41 @@ function makeJoints(frameId: number): JointAngle[] {
   }));
 }
 
+// Module-level cooldown for mock kinematic anomalies (~30 s at 100 ms per frame)
+let _lastKinematicAnomalyFrame = -Infinity;
+const KINEMATIC_ANOMALY_COOLDOWN_FRAMES = 300;
+
 export function generateKinematicFrame(frameId: number): KinematicFrame {
-  const anomalyScore = frameId === 150 ? 0.87 : Math.random() * 0.15;
+  // Progressive anomaly score that drifts naturally with simulated joint activity
+  // instead of snapping between 0 and 0.87.
+  const joints = makeJoints(frameId);
+  const maxVel = Math.max(...joints.map((j) => Math.abs(j.velocityRadPerSec)), 0);
+  const maxTorque = Math.max(...joints.map((j) => j.torqueNm), 0);
+  // Base score 0–~0.55 derived from velocity + torque + a slow sine drift
+  const drift = 0.08 * Math.sin(frameId * 0.004);  // slow ambient oscillation
+  const baseScore = Math.min(maxVel / 2.0, 0.35) + Math.min(maxTorque / 8.0, 0.2) + drift + Math.random() * 0.04;
+
+  let anomalyScore: number;
+  if (frameId === 150) {
+    anomalyScore = 0.87;
+    _lastKinematicAnomalyFrame = frameId;
+  } else if (
+    Math.random() < 0.005 &&
+    (frameId - _lastKinematicAnomalyFrame) >= KINEMATIC_ANOMALY_COOLDOWN_FRAMES
+  ) {
+    // Anomalous: boost score into 0.72–0.95 range
+    anomalyScore = Math.min(Math.max(baseScore + 0.45, 0.72), 0.95);
+    _lastKinematicAnomalyFrame = frameId;
+  } else {
+    // Normal: clamp below threshold so it still fluctuates visibly
+    anomalyScore = Math.max(0, Math.min(baseScore, 0.55));
+  }
 
   return {
     timestamp: new Date(Date.now() + frameId * 100).toISOString(),
     frameId,
     deviceId: 'robot-arm-001',
-    joints: makeJoints(frameId),
+    joints,
     endEffector: {
       position: { x: Math.sin(frameId * 0.01) * 50 + 200, y: Math.cos(frameId * 0.01) * 30 + 150, z: 100 + Math.sin(frameId * 0.005) * 20 },
       orientation: { roll: Math.sin(frameId * 0.02) * 5, pitch: Math.cos(frameId * 0.02) * 3, yaw: frameId * 0.1 % 360 },
@@ -670,12 +763,25 @@ export function tickVitalSigns(current: VitalSign[]): VitalSign[] {
   });
 }
 
-/** Simulates occasional anomaly alerts */
-export function maybeGenerateAlert(vitals: VitalSign[]): AnomalyAlert | null {
+// ─── Anomaly cooldown state for mock mode ───────────────────────────────────
+// Global cooldown across ALL alert types to prevent flooding.
+const MOCK_ANOMALY_COOLDOWN_MS = 30_000;
+let _lastMockAlertTimestamp = 0;
+
+/** Simulates occasional anomaly alerts with cooldown to prevent flooding */
+export function maybeGenerateAlert(vitals: VitalSign[], patientId?: string): AnomalyAlert | null {
+  const now = Date.now();
+
+  // Enforce cooldown — no new alert within 30 s of the last one
+  if (now - _lastMockAlertTimestamp < MOCK_ANOMALY_COOLDOWN_MS) {
+    return null;
+  }
+
   for (const v of vitals) {
     if (v.value > v.normalRange.high) {
+      _lastMockAlertTimestamp = now;
       return {
-        id: `alert-auto-${Date.now()}`,
+        id: `alert-auto-${now}`,
         severity: v.value > v.normalRange.high * 1.1 ? 'critical' : 'warning',
         title: `${v.display} Above Threshold`,
         message: `${v.display} at ${v.value} ${v.unit} (upper limit: ${v.normalRange.high} ${v.unit})`,
@@ -685,11 +791,13 @@ export function maybeGenerateAlert(vitals: VitalSign[]): AnomalyAlert | null {
         timestamp: new Date().toISOString(),
         acknowledged: false,
         source: 'vitals',
+        patientId,
       };
     }
     if (v.value < v.normalRange.low) {
+      _lastMockAlertTimestamp = now;
       return {
-        id: `alert-auto-${Date.now()}`,
+        id: `alert-auto-${now}`,
         severity: v.value < v.normalRange.low * 0.9 ? 'critical' : 'warning',
         title: `${v.display} Below Threshold`,
         message: `${v.display} at ${v.value} ${v.unit} (lower limit: ${v.normalRange.low} ${v.unit})`,
@@ -699,6 +807,7 @@ export function maybeGenerateAlert(vitals: VitalSign[]): AnomalyAlert | null {
         timestamp: new Date().toISOString(),
         acknowledged: false,
         source: 'vitals',
+        patientId,
       };
     }
   }

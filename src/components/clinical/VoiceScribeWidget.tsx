@@ -21,8 +21,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Mic, MicOff, Loader2, CheckCircle, AlertTriangle, FileDown } from 'lucide-react';
-import jsPDF from 'jspdf';
+import { Mic, MicOff, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
@@ -30,7 +29,6 @@ import {
   processScribeObservation,
   SCRIBE_BILLED_AMOUNT,
   type ScribeObservationResult,
-  type GeminiInsights,
 } from '@/api/voice-scribe';
 import { cn } from '@/lib/utils';
 
@@ -166,15 +164,6 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
           description: `"${result.transcript.slice(0, 80)}…" — Vital: ${vitalDisplay} — Billed: $${SCRIBE_BILLED_AMOUNT.toFixed(2)} via Paid.ai`,
         });
 
-        // If Gemini flagged critical warnings, alert the surgeon immediately
-        if (result.geminiInsights?.criticalWarnings) {
-          toast({
-            title: '⚠️ Gemini Clinical Warning',
-            description: result.geminiInsights.criticalWarnings,
-            variant: 'destructive',
-          });
-        }
-
         // Notify parent so ClinicalDashboard can surface the observation
         onObservationCreated?.(result);
       } catch (err) {
@@ -194,96 +183,6 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
     }
     // state === 'processing' → ignore clicks (debounce)
   }, [state, toast, onObservationCreated]);
-
-  const handleDownloadPDF = useCallback(() => {
-    if (!lastResult) return;
-
-    const doc = new jsPDF();
-    const margin = 20;
-    let cursorY = margin;
-
-    // Hospital Header
-    doc.setFontSize(22);
-    doc.setTextColor(30, 64, 175); // Primary Blue
-    doc.text('Aegis Clinical Dictation', margin, cursorY);
-    cursorY += 8;
-
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139); // Muted foreground
-    doc.text(`Generated: ${new Date().toLocaleString()}`, margin, cursorY);
-    cursorY += 15;
-
-    // Separator line
-    doc.setDrawColor(226, 232, 240);
-    doc.line(margin, cursorY, 190, cursorY);
-    cursorY += 10;
-
-    // Scribe Details
-    doc.setFontSize(14);
-    doc.setTextColor(15, 23, 42); // Foreground
-    doc.text('Observation Summary', margin, cursorY);
-    cursorY += 8;
-
-    doc.setFontSize(11);
-    doc.text(`FHIR Code: ${lastResult.observation.code.text ?? 'Unknown Observation'}`, margin, cursorY);
-    cursorY += 6;
-
-    const val = lastResult.observation.valueQuantity
-      ? `${lastResult.observation.valueQuantity.value} ${lastResult.observation.valueQuantity.unit}`
-      : lastResult.observation.valueString ?? 'N/A';
-    doc.text(`Computed Value: ${val}`, margin, cursorY);
-    cursorY += 10;
-
-    // Transcript
-    doc.setFontSize(14);
-    doc.text('Original Transcript', margin, cursorY);
-    cursorY += 8;
-
-    doc.setFontSize(11);
-    doc.setTextColor(71, 85, 105);
-    const splitTranscript = doc.splitTextToSize(`"${lastResult.transcript}"`, 170);
-    doc.text(splitTranscript, margin, cursorY);
-    cursorY += splitTranscript.length * 6 + 10;
-
-    // Gemini Insights
-    if (lastResult.geminiInsights) {
-      doc.setFontSize(14);
-      doc.setTextColor(15, 23, 42);
-      doc.text('AI Medical Insights', margin, cursorY);
-      cursorY += 8;
-
-      doc.setFontSize(11);
-      doc.setTextColor(71, 85, 105);
-      doc.text(`Predicted Procedure: ${lastResult.geminiInsights.procedure}`, margin, cursorY);
-      cursorY += 6;
-
-      if (lastResult.geminiInsights.criticalWarnings) {
-        doc.setTextColor(220, 38, 38); // Destructive / Red
-        const warnings = doc.splitTextToSize(`WARNING: ${lastResult.geminiInsights.criticalWarnings}`, 170);
-        doc.text(warnings, margin, cursorY);
-        cursorY += warnings.length * 6;
-      }
-      cursorY += 4;
-    }
-
-    // Billing Footnote
-    doc.setFontSize(9);
-    doc.setTextColor(148, 163, 184); // Muted
-    doc.text(
-      `Billing Trace ID: ${lastResult.billing.trace.traceId} • Billed: $${lastResult.billing.trace.billedAmount.toFixed(2)} via Paid.ai`,
-      margin,
-      280
-    );
-
-    // Save PDF
-    const safeDate = new Date().toISOString().slice(0, 10);
-    doc.save(`clinical-note-${safeDate}.pdf`);
-
-    toast({
-      title: 'PDF Downloaded',
-      description: 'Your clinical note has been exported to PDF successfully.',
-    });
-  }, [lastResult, toast]);
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -353,41 +252,6 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
             <p className="text-[10px] text-muted-foreground/60">
               Trace: {lastResult.billing.trace.traceId} · {lastResult.billing.trace.outcome}
             </p>
-
-            {/* ── Gemini Clinical Insights ──────────────────────── */}
-            {lastResult.geminiInsights && (
-              <div className="mt-2 space-y-1 border-t border-border pt-2" data-testid="scribe-gemini-insights">
-                <p className="font-medium text-primary">
-                  🧠 Gemini Insights
-                </p>
-                <p className="text-muted-foreground">
-                  <span className="font-medium">Procedure:</span>{' '}
-                  {lastResult.geminiInsights.procedure}
-                </p>
-                {lastResult.geminiInsights.criticalWarnings && (
-                  <p className="font-medium text-destructive" data-testid="scribe-gemini-warning">
-                    ⚠️ {lastResult.geminiInsights.criticalWarnings}
-                  </p>
-                )}
-                <p className="text-muted-foreground">
-                  <span className="font-medium">Observation Value:</span>{' '}
-                  {lastResult.geminiInsights.fhirObservationValue}
-                </p>
-              </div>
-            )}
-
-            {/* ── PDF Download Button ──────────────────────────── */}
-            <div className="pt-3 border-t border-border mt-3">
-              <Button
-                variant="default"
-                size="sm"
-                className="w-full gap-2 bg-primary/90 hover:bg-primary shadow-sm"
-                onClick={handleDownloadPDF}
-              >
-                <FileDown className="w-4 h-4" />
-                Export Note as PDF
-              </Button>
-            </div>
           </div>
         )}
       </CardContent>

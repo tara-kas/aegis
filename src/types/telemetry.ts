@@ -64,6 +64,8 @@ export interface AnomalyAlert {
   timestamp: string;
   acknowledged: boolean;
   source: 'telemetry' | 'vitals' | 'inference' | 'system';
+  /** Patient this alert belongs to (displayed as a colour-coded badge) */
+  patientId?: string;
   /** Insights from Google HAI-DEF cross-referencing (populated asynchronously) */
   haiDefInsights?: {
     globalConfidenceScore: number;

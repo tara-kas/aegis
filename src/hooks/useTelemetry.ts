@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { VitalSign, AnomalyAlert, KinematicFrame, ConnectionStatus, JointAngle } from '../types/telemetry';
 import type { PaidAiTrace, CostBreakdown } from '../types/financial';
 import type { FhirObservation } from '../api/fhir';
-import { mockVitalSigns, mockAnomalyAlerts, tickVitalSigns, maybeGenerateAlert, generateKinematicFrame } from '../mock/data';
+import { mockVitalSigns, mockAnomalyAlerts, tickVitalSigns, maybeGenerateAlert, generateKinematicFrame, getPatientVitalSigns } from '../mock/data';
 import { traceObservationWorkflow, onTraceRecorded, getTraceStore } from '../api/telemetry-billing';
 import { evaluateFrame, onSafetyAlert } from '../api/reliability-agents';
 import { validateFhirResource } from '../utils/fhirValidation';
@@ -17,6 +17,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface UseTelemetryOptions {
   deviceId: string;
+  patientId?: string;
   vitalIntervalMs?: number;
   kinematicIntervalMs?: number;
   maxAlerts?: number;
@@ -54,9 +55,9 @@ const DEFAULT_VITAL_COSTS: CostBreakdown = {
 const DEFAULT_VITAL_BILLED = 0.05; // €0.05 per vital-sign observation
 
 export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
-  const { deviceId, vitalIntervalMs = 2000, kinematicIntervalMs = 100, maxAlerts = 50 } = options;
+  const { deviceId, patientId = 'patient-001', vitalIntervalMs = 2000, kinematicIntervalMs = 100, maxAlerts = 50 } = options;
 
-  const [vitals, setVitals] = useState<VitalSign[]>(mockVitalSigns);
+  const [vitals, setVitals] = useState<VitalSign[]>(() => getPatientVitalSigns(patientId));
   const [alerts, setAlerts] = useState<AnomalyAlert[]>(mockAnomalyAlerts);
   const [latestFrame, setLatestFrame] = useState<KinematicFrame | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
@@ -66,6 +67,70 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   const frameCounter = useRef(0);
   const vitalTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const kinematicTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  // ── Anomaly cooldown & deduplication ────────────────────────────────────
+  const ANOMALY_COOLDOWN_MS = 30_000; // 30 s — global cooldown across ALL alert types
+  const lastLiveAnomalyTs = useRef(0); // timestamp of last live anomaly alert
+  const lastAnyAlertTs = useRef(0);    // global: timestamp of last alert of ANY kind
+  const alertTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const ALERT_AUTO_CLEAR_MS = 8_000; // alerts auto-dismiss after 8 s
+  const GLOBAL_ALERT_COOLDOWN_MS = 30_000; // block ALL new alerts for 30 s after any alert
+
+  /**
+   * Add an alert only if the global cooldown has expired and no duplicate exists.
+   * If a similar alert already exists (same source, or same severity+unacknowledged),
+   * fuse the new info into the existing alert instead of stacking.
+   * Auto-clear after 8 s.
+   */
+  const addAlertWithDedup = useCallback((newAlert: AnomalyAlert) => {
+    const now = Date.now();
+
+    // ── Global cooldown: block ALL new alerts for 30 s after the last one ──
+    if (now - lastAnyAlertTs.current < GLOBAL_ALERT_COOLDOWN_MS) {
+      // Fuse into an existing unacknowledged alert from the same source if one exists
+      setAlerts((prev) => {
+        const idx = prev.findIndex((a) => !a.acknowledged && a.source === newAlert.source);
+        if (idx === -1) return prev; // nothing to fuse into — just drop
+        const fused = { ...prev[idx] };
+        // Update the message with the latest info without creating a new entry
+        if (fused.message !== newAlert.message) {
+          fused.message = newAlert.message;
+          fused.currentValue = newAlert.currentValue;
+          fused.timestamp = newAlert.timestamp;
+        }
+        const next = [...prev];
+        next[idx] = fused;
+        return next;
+      });
+      return;
+    }
+
+    // ── Strict dedup: skip if an unacknowledged alert with same source OR title exists
+    setAlerts((prev) => {
+      const isDuplicate = prev.some(
+        (a) =>
+          !a.acknowledged &&
+          (a.source === newAlert.source || a.title === newAlert.title),
+      );
+      if (isDuplicate) return prev;
+      return [newAlert, ...prev].slice(0, maxAlerts);
+    });
+
+    lastAnyAlertTs.current = now;
+
+    // Auto-remove after 8 s so the screen naturally clears
+    const timer = setTimeout(() => {
+      setAlerts((prev) => prev.filter((a) => a.id !== newAlert.id));
+      alertTimersRef.current.delete(newAlert.id);
+    }, ALERT_AUTO_CLEAR_MS);
+    alertTimersRef.current.set(newAlert.id, timer);
+  }, [maxAlerts]);
+
+  // ── Reset vital signs when patient changes ───────────────────────────────
+  useEffect(() => {
+    setVitals(getPatientVitalSigns(patientId));
+  }, [patientId]);
   const prevFrameTimestamp = useRef<string | null>(null);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const liveFrameCounter = useRef(0);
@@ -81,10 +146,10 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   // ── Subscribe to Incident Commander safety alerts ────────────────────────
   useEffect(() => {
     const unsubscribe = onSafetyAlert((alert) => {
-      setAlerts((prev) => [alert, ...prev].slice(0, maxAlerts));
+      addAlertWithDedup(alert);
     });
     return unsubscribe;
-  }, [maxAlerts]);
+  }, [addAlertWithDedup]);
 
   // ── Manual billing trigger ───────────────────────────────────────────────
   const recordObservationBilling = useCallback(async (
@@ -134,6 +199,9 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
       supabase.removeChannel(realtimeChannelRef.current);
       realtimeChannelRef.current = null;
     }
+    // Clear all pending alert auto-dismiss timers
+    alertTimersRef.current.forEach((t) => clearTimeout(t));
+    alertTimersRef.current.clear();
     setIsStreaming(false);
     setConnectionStatus('disconnected');
     log.info('Telemetry stream stopped', { deviceId });
@@ -195,7 +263,19 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
             }));
 
             const [x = 0, y = 0, z = 0] = data.end_effector_xyz ?? [];
-            const anomalyScore = data.anomaly_detected ? 0.9 : Math.random() * 0.1;
+
+            // Progressive anomaly score derived from actual telemetry signals
+            // instead of a binary 0.9 / random(0–0.1) split.
+            const velocities = data.joint_velocities ?? [];
+            const maxVel = Math.max(...velocities.map(Math.abs), 0);
+            const velContrib = Math.min(maxVel / 3.0, 0.5);  // 0–0.5 from velocity magnitude
+            const forces = data.applied_forces ?? [];
+            const maxForce = Math.max(...forces.map(Math.abs), 0);
+            const forceContrib = Math.min(maxForce / 10.0, 0.3);  // 0–0.3 from force magnitude
+            const baseAnomalyScore = velContrib + forceContrib + Math.random() * 0.05;
+            const anomalyScore = data.anomaly_detected
+              ? Math.min(Math.max(baseAnomalyScore + 0.35, 0.72), 0.98)  // boost into 0.72–0.98 when flagged
+              : Math.min(baseAnomalyScore, 0.65);  // cap below threshold when normal
 
             const frame: KinematicFrame = {
               timestamp: data.timestamp ?? new Date().toISOString(),
@@ -226,20 +306,27 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
             }
 
             if (data.anomaly_detected) {
-              metrics.increment('kinematic.anomaly_detected', { deviceId });
-              const alert: AnomalyAlert = {
-                id: `alert-live-${currentFrameId}`,
-                severity: 'critical',
-                title: 'Kinematic Anomaly Detected',
-                message: data.anomaly_reason ?? 'Robotic arm deviation detected',
-                metric: 'joint-deviation',
-                currentValue: anomalyScore,
-                threshold: 0.7,
-                timestamp: data.timestamp ?? new Date().toISOString(),
-                acknowledged: false,
-                source: 'telemetry',
-              };
-              setAlerts((prev) => [alert, ...prev].slice(0, maxAlerts));
+              // ── Cooldown: skip if a live anomaly alert was raised < 12 s ago
+              const now = Date.now();
+              if (now - lastLiveAnomalyTs.current < ANOMALY_COOLDOWN_MS) {
+                metrics.increment('kinematic.anomaly_suppressed', { deviceId });
+              } else {
+                lastLiveAnomalyTs.current = now;
+                metrics.increment('kinematic.anomaly_detected', { deviceId });
+                addAlertWithDedup({
+                  id: `alert-live-${currentFrameId}`,
+                  severity: 'critical',
+                  title: 'Kinematic Anomaly Detected',
+                  message: data.anomaly_reason ?? 'Robotic arm deviation detected',
+                  metric: 'joint-deviation',
+                  currentValue: anomalyScore,
+                  threshold: 0.7,
+                  timestamp: data.timestamp ?? new Date().toISOString(),
+                  acknowledged: false,
+                  source: 'telemetry',
+                  patientId,
+                });
+              }
             }
           }
         )
@@ -262,9 +349,9 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
       vitalTimerRef.current = setInterval(() => {
         setVitals((prev) => {
           const updated = tickVitalSigns(prev);
-          const alert = maybeGenerateAlert(updated);
+          const alert = maybeGenerateAlert(updated, patientId);
           if (alert) {
-            setAlerts((a) => [alert, ...a].slice(0, maxAlerts));
+            addAlertWithDedup(alert);
             metrics.increment('alerts.generated', { deviceId, severity: alert.severity });
 
             // Fire-and-forget HAI-DEF cross-reference
@@ -343,9 +430,9 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
       vitalTimerRef.current = setInterval(() => {
         setVitals((prev) => {
           const updated = tickVitalSigns(prev);
-          const alert = maybeGenerateAlert(updated);
+          const alert = maybeGenerateAlert(updated, patientId);
           if (alert) {
-            setAlerts((a) => [alert, ...a].slice(0, maxAlerts));
+            addAlertWithDedup(alert);
             metrics.increment('alerts.generated', { deviceId, severity: alert.severity });
 
             // Fire-and-forget HAI-DEF cross-reference
@@ -440,7 +527,7 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
         }
       }, kinematicIntervalMs);
     }, 500);
-  }, [deviceId, vitalIntervalMs, kinematicIntervalMs, maxAlerts, stopStream]);
+  }, [deviceId, vitalIntervalMs, kinematicIntervalMs, maxAlerts, stopStream, addAlertWithDedup]);
 
   useEffect(() => {
     startStream();

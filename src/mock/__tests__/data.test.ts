@@ -20,6 +20,7 @@ import {
   tickVitalSigns,
   maybeGenerateAlert,
   generateKinematicFrame,
+  getPatientVitalSigns,
 } from '../data';
 
 describe('Mock Data Integrity', () => {
@@ -187,5 +188,41 @@ describe('Telemetry Simulation', () => {
     const frame = generateKinematicFrame(150);
     expect(frame.isAnomalous).toBe(true);
     expect(frame.anomalyScore).toBeGreaterThan(0.7);
+  });
+
+  it('getPatientVitalSigns should return 7 vitals for any patient', () => {
+    const vitals = getPatientVitalSigns('patient-001');
+    expect(vitals).toHaveLength(7);
+    const displays = vitals.map((v) => v.display);
+    expect(displays).toContain('Heart Rate');
+    expect(displays).toContain('SpO\u2082');
+    expect(displays).toContain('Resp Rate');
+  });
+
+  it('getPatientVitalSigns should produce distinct baselines per patient', () => {
+    const vitalsA = getPatientVitalSigns('patient-001');
+    const vitalsB = getPatientVitalSigns('patient-002');
+    const vitalsC = getPatientVitalSigns('patient-003');
+
+    const hrA = vitalsA.find((v) => v.code === '8867-4')!.value;
+    const hrB = vitalsB.find((v) => v.code === '8867-4')!.value;
+    const hrC = vitalsC.find((v) => v.code === '8867-4')!.value;
+
+    // Patient A: ~67 bpm, Patient B: ~112 bpm, Patient C: ~87 bpm — all different
+    expect(hrA).not.toBe(hrB);
+    expect(hrB).not.toBe(hrC);
+    expect(hrA).toBeLessThan(75);    // Patient A is low-normal
+    expect(hrB).toBeGreaterThan(105); // Patient B is tachycardic
+    expect(hrC).toBeGreaterThan(80);  // Patient C is moderate
+    expect(hrC).toBeLessThan(95);
+  });
+
+  it('getPatientVitalSigns should produce deterministic baselines for unknown patients', () => {
+    const vitals1 = getPatientVitalSigns('patient-999');
+    const vitals2 = getPatientVitalSigns('patient-999');
+    // Same patient ID should yield same baseline values
+    for (let i = 0; i < vitals1.length; i++) {
+      expect(vitals1[i].value).toBe(vitals2[i].value);
+    }
   });
 });
