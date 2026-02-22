@@ -30,6 +30,7 @@ import {
 import { createStripeClient, type CreateCheckoutResponse } from '../api/stripe';
 import { createDevnetConnection } from '../api/solana-micropayments';
 import { getTraceStore, onTraceRecorded } from '../api/telemetry-billing';
+import { getDataMode, shouldTryLive, isMockOnly } from '../lib/data-mode';
 import { logger } from '../utils/logger';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -88,6 +89,11 @@ async function fetchSolanaTransactions(): Promise<{
   isLive: boolean;
   error: string | null;
 }> {
+  // In mock-only mode, skip all network calls
+  if (!shouldTryLive()) {
+    return { transactions: mockSolanaTransactions, isLive: false, error: null };
+  }
+
   try {
     const connection = createDevnetConnection();
     // Test connectivity with a quick getSlot call
@@ -128,6 +134,11 @@ async function fetchStripeStatus(): Promise<{
   isLive: boolean;
   error: string | null;
 }> {
+  // In mock-only mode, skip all network calls
+  if (!shouldTryLive()) {
+    return { acpStatus: mockACPStatus, subscriptions: mockSubscriptions, isLive: false, error: null };
+  }
+
   try {
     const client = createStripeClient();
 
@@ -188,6 +199,8 @@ function computeMargins(traces: PaidAiTrace[]): MarginData[] {
     'surgical-obs': 'Surgical Observation Pipeline',
     'preop-imaging': 'Pre-operative Imaging Analysis',
     'note-transcription': 'Clinical Note Transcription',
+    'continuous_vitals_monitoring': 'Continuous Vitals Monitoring',
+    'autonomous_scribe_observation': 'Autonomous Voice Scribe',
   };
 
   // Cost distribution ratios per workflow (based on typical vendor usage)
@@ -212,6 +225,20 @@ function computeMargins(traces: PaidAiTrace[]): MarginData[] {
       googleHaiDef: 0.0,
       supabaseStorage: 0.005,
       solanaFees: 0.0001,
+    },
+    'continuous_vitals_monitoring': {
+      crusoeInference: 0.667,
+      elevenLabsVoice: 0.0,
+      googleHaiDef: 0.278,
+      supabaseStorage: 0.055,
+      solanaFees: 0.00055,
+    },
+    'autonomous_scribe_observation': {
+      crusoeInference: 0.4998,
+      elevenLabsVoice: 0.2499,
+      googleHaiDef: 0.2083,
+      supabaseStorage: 0.0416,
+      solanaFees: 0.00042,
     },
   };
 
@@ -258,6 +285,47 @@ function computeMargins(traces: PaidAiTrace[]): MarginData[] {
   return margins;
 }
 
+// ─── Revenue Time-Series from Traces ─────────────────────────────────────────
+
+/**
+ * Builds a time-series of revenue vs. cost data points from trace records,
+ * bucketed by minute. When traces have no timestamps (or there are no traces),
+ * falls back to `mockRevenueData` so the chart is never empty.
+ */
+function computeRevenueTimeSeries(traces: PaidAiTrace[]): RevenueDataPoint[] {
+  if (traces.length === 0) return mockRevenueData;
+
+  // Group traces by minute bucket
+  const bucketMap = new Map<string, { revenue: number; costs: number }>();
+
+  for (const trace of traces) {
+    const ts = trace.completedAt ?? trace.startedAt;
+    if (!ts) continue;
+
+    // Bucket key: truncate to the minute
+    const d = new Date(ts);
+    d.setSeconds(0, 0);
+    const key = d.toISOString();
+
+    const existing = bucketMap.get(key) ?? { revenue: 0, costs: 0 };
+    existing.revenue += trace.billedAmount;
+    existing.costs += trace.costAmount;
+    bucketMap.set(key, existing);
+  }
+
+  if (bucketMap.size === 0) return mockRevenueData;
+
+  // Sort by timestamp
+  const sorted = [...bucketMap.entries()].sort(([a], [b]) => a.localeCompare(b));
+
+  return sorted.map(([timestamp, { revenue, costs }]) => ({
+    timestamp,
+    revenue: Math.round(revenue * 100) / 100,
+    costs: Math.round(costs * 100) / 100,
+    profit: Math.round((revenue - costs) * 100) / 100,
+  }));
+}
+
 // ─── Main Hook ───────────────────────────────────────────────────────────────
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000; // 30s
@@ -270,8 +338,8 @@ export function useFinancialData(
     solanaTransactions: [],
     acpStatus: mockACPStatus,
     subscriptions: mockSubscriptions,
-    revenueData: mockRevenueData,
-    paidAiTraces: mockPaidAiTraces,
+    revenueData: [],
+    paidAiTraces: [],
   });
 
   const [loading, setLoading] = useState<FinancialLoadingState>({
@@ -302,11 +370,21 @@ export function useFinancialData(
 
     if (!mountedRef.current) return;
 
-    // Compute margins from trace data — merge live billing traces with mocks
+    // Determine trace source based on data mode.
+    // mock  → always mock data
+    // live  → only live traces (empty if none yet)
+    // hybrid → live traces if available, else mock fallback
     const liveTraces = getTraceStore();
-    const allTraces = liveTraces.length > 0
-      ? [...mockPaidAiTraces, ...liveTraces]
-      : mockPaidAiTraces;
+    const mode = getDataMode();
+    let allTraces: PaidAiTrace[];
+    if (mode === 'mock') {
+      allTraces = mockPaidAiTraces;
+    } else if (mode === 'live') {
+      allTraces = liveTraces;
+    } else {
+      // hybrid: prefer live, fall back to mock
+      allTraces = liveTraces.length > 0 ? liveTraces : mockPaidAiTraces;
+    }
 
     let computedMargins: MarginData[];
     let marginsError: string | null = null;
@@ -323,7 +401,10 @@ export function useFinancialData(
       marginsError = message;
     }
 
-    const anyLive = stripeResult.isLive || solanaResult.isLive;
+    const hasLiveTraces = liveTraces.length > 0;
+    const anyLive = mode === 'mock'
+      ? false
+      : stripeResult.isLive || solanaResult.isLive || hasLiveTraces;
     const hasError = !!(stripeResult.error || solanaResult.error || marginsError);
 
     setData({
@@ -331,7 +412,7 @@ export function useFinancialData(
       solanaTransactions: solanaResult.transactions,
       acpStatus: stripeResult.acpStatus,
       subscriptions: stripeResult.subscriptions,
-      revenueData: mockRevenueData,
+      revenueData: computeRevenueTimeSeries(allTraces),
       paidAiTraces: allTraces,
     });
 
