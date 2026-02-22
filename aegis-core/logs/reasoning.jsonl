@@ -1,2 +1,0 @@
-{"timestamp": "2026-02-21T17:46:36.286992+00:00", "model": "mistral", "latency_ms": 14048.870086669922, "status": "critical", "anomalies_detected": 1, "confidence": 1.0, "mode": "local"}
-{"timestamp": "2026-02-21T18:44:53.363052+00:00", "model": "mistral", "latency_ms": 15339.390754699707, "status": "critical", "anomalies_detected": 1, "confidence": 1.0, "mode": "local"}

@@ -6,17 +6,24 @@
 .env.production.local
 .env.development.local
 .env.test
+**/.env
 
 # Dependencies
 node_modules/
+
+# Build output
 dist/
 build/
-*.lock
+
+# Lockfiles — keep package-lock.json for reproducible installs
 bun.lockb
+yarn.lock
+pnpm-lock.yaml
 
 # Python bytecode
 __pycache__/
 *.pyc
+*.pyo
 
 # Vitest results cache
 node_modules/.vite/
@@ -29,6 +36,7 @@ test-results/
 # Logs
 logs/
 *.log
+*.jsonl
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -39,15 +47,20 @@ pnpm-debug.log*
 *.temp
 .cache/
 
-# Editor directories
+# Editor / IDE directories
 .vscode/
 .idea/
+.cursor/
+.claude/
 *.swp
 *.swo
 *~
 
 # Solana wallet keypair — NEVER commit private keys
 aegis-wallet.json
+
+# Generated files
+*.pdf
 
 # Temporary documentation (consolidated into main docs)
 PHASE_5_COMPLETE.md
