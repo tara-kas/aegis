@@ -1,6 +1,17 @@
 """
 Complete Webots Python supervisor controller for a 6-axis surgical robotic arm.
 Conceptually modelled on the Da Vinci system.
+
+Surgical trajectory modes:
+  1. Suturing  — small elliptical loops that mimic needle-driving and knot-tying
+  2. Incision  — slow linear strokes along the Y-axis with controlled depth
+
+Breathing compensation:
+  A slow sinusoidal wave on the Z-axis (~0.25 Hz, 2 mm amplitude) simulates the
+  robot actively compensating for the patient's respiratory motion.
+
+Telemetry is POST-ed every 500 ms, including a stochastic anomaly flag that fires
+~5 % of the time so the front-end alert pipeline can be exercised.
 """
 import sys
 import os
@@ -9,8 +20,9 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 import json
 import time
+import random
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import httpx
 import math
 
@@ -44,6 +56,30 @@ SENSOR_NAMES = [
     "wrist_3_joint_sensor"
 ]
 
+# ─── Surgical trajectory constants ───────────────────────────────────────────
+
+# How long each phase lasts (seconds of sim time) before cycling
+SUTURE_PHASE_DURATION = 8.0      # one full suture loop
+INCISION_PHASE_DURATION = 6.0    # one full incision stroke
+
+# Breathing compensation: ~15 breaths/min → 0.25 Hz, ±2 mm amplitude
+BREATHING_FREQ_HZ = 0.25
+BREATHING_AMPLITUDE_RAD = 0.008  # maps to ~2 mm at the wrist
+
+# Random anomaly injection probability (per telemetry tick)
+RANDOM_ANOMALY_PROBABILITY = 0.05
+
+# Fixed telemetry cadence for the demo (overrides env default)
+TELEMETRY_SEND_INTERVAL_MS = 500
+
+RANDOM_ANOMALY_REASONS = [
+    "Unexpected force spike on wrist_3_joint — possible tissue resistance",
+    "End-effector drift exceeded 1.5 mm — recalibrating",
+    "Joint velocity transient on elbow_joint — vibration damping engaged",
+    "Instrument tip deflection detected — adjusting trajectory",
+    "Momentary communication latency >150 ms with control unit",
+]
+
 
 class SurgicalArmController:
     """Webots supervisor controller for 6-axis surgical robotic arm."""
@@ -58,7 +94,7 @@ class SurgicalArmController:
             motor = self.robot.getDevice(name)
             if motor:
                 motor.setPosition(float('inf'))
-                motor.setVelocity(0.5)  # gentle default velocity
+                motor.setVelocity(0.3)  # slow, precise surgical velocity
                 self.motors.append(motor)
             else:
                 raise RuntimeError(f"Failed to initialize motor: {name}. Check joint name matches Webots proto.")
@@ -68,10 +104,13 @@ class SurgicalArmController:
         for name in SENSOR_NAMES:
             sensor = self.robot.getDevice(name)
             if sensor:
-                sensor.enable(32)  # Enable at 32ms timestep
+                sensor.enable(self.timestep)
                 self.position_sensors.append(sensor)
             else:
                 raise RuntimeError(f"Failed to initialize sensor: {name}. Check sensor name matches Webots proto.")
+
+        # Previous joint angles for numeric velocity estimation
+        self.prev_joint_angles: Optional[List[float]] = None
 
         # Previous end effector position for anomaly detection
         self.previous_end_effector_xyz: Optional[List[float]] = None
@@ -82,41 +121,135 @@ class SurgicalArmController:
         # Simulation time tracker
         self.t = 0.0
 
+        # Surgical phase: alternates between "suture" and "incision"
+        self.phase = "suture"
+        self.phase_start_t = 0.0
+
         print("[CONTROLLER] UR5e motors and sensors initialised successfully")
+        print(f"[CONTROLLER] Telemetry interval: {TELEMETRY_SEND_INTERVAL_MS} ms")
+        print(f"[CONTROLLER] Random anomaly probability: {RANDOM_ANOMALY_PROBABILITY * 100:.0f}%")
+
+    # ─── Surgical trajectory generation ───────────────────────────────────
+
+    def _suture_targets(self, phase_t: float) -> List[float]:
+        """
+        Generate joint targets for a suturing motion.
+
+        The end-effector traces small elliptical loops (needle-driving)
+        while the wrist rotates to simulate knot-tying.
+
+        phase_t: seconds elapsed within the current suture phase.
+        """
+        # Normalise to [0, 2π] over the phase duration
+        theta = (phase_t / SUTURE_PHASE_DURATION) * 2.0 * math.pi
+
+        # Shoulder: nearly stationary, slight lateral adjustment
+        shoulder_pan = 0.05 * math.sin(theta)
+        # Shoulder lift: small controlled dip for needle entry
+        shoulder_lift = -0.40 + 0.03 * math.sin(theta)
+        # Elbow: primary elliptical drive — small amplitude
+        elbow = 0.60 + 0.05 * math.cos(theta)
+        # Wrist 1: needle rotation (quarter-turn arcs)
+        wrist_1 = 0.15 * math.sin(2.0 * theta)
+        # Wrist 2: lateral fine adjustment
+        wrist_2 = 0.08 * math.cos(theta)
+        # Wrist 3: knot-tying twist
+        wrist_3 = 0.12 * math.sin(3.0 * theta)
+
+        return [shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]
+
+    def _incision_targets(self, phase_t: float) -> List[float]:
+        """
+        Generate joint targets for a linear incision stroke.
+
+        The end-effector moves in a slow, straight line along the Y-axis
+        (the "cut" direction) with controlled Z depth.
+
+        phase_t: seconds elapsed within the current incision phase.
+        """
+        # Progress from 0→1 over the phase, then reverse (back-and-forth)
+        progress = phase_t / INCISION_PHASE_DURATION
+        # Triangle wave: 0→1→0 for smooth back-and-forth stroke
+        triangle = 1.0 - abs(2.0 * progress - 1.0)
+
+        # Shoulder: translate along the incision line
+        shoulder_pan = 0.02 * triangle
+        # Shoulder lift: maintain steady depth
+        shoulder_lift = -0.42 + 0.01 * triangle
+        # Elbow: extend slightly during the stroke
+        elbow = 0.58 + 0.04 * triangle
+        # Wrist 1: keep blade angle constant
+        wrist_1 = 0.05
+        # Wrist 2: slight roll for blade orientation
+        wrist_2 = 0.03 * math.sin(math.pi * progress)
+        # Wrist 3: no twist during incision
+        wrist_3 = 0.02 * triangle
+
+        return [shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3]
+
+    def _breathing_compensation(self) -> List[float]:
+        """
+        Return per-joint offsets that simulate compensating for patient breathing.
+
+        A slow sinusoidal wave (~0.25 Hz ≈ 15 breaths/min) is applied primarily
+        to the shoulder-lift and wrist-1 joints (Z-axis compensation).
+        """
+        breath = math.sin(2.0 * math.pi * BREATHING_FREQ_HZ * self.t)
+
+        return [
+            0.0,                                    # shoulder pan — unaffected
+            BREATHING_AMPLITUDE_RAD * breath,       # shoulder lift — primary Z comp
+            -BREATHING_AMPLITUDE_RAD * 0.5 * breath,  # elbow — counter-compensate
+            BREATHING_AMPLITUDE_RAD * 0.3 * breath, # wrist 1 — fine Z adjustment
+            0.0,                                    # wrist 2 — unaffected
+            0.0,                                    # wrist 3 — unaffected
+        ]
 
     def move_arm(self):
         """
-        Drive the UR5e through a gentle oscillating surgical motion.
-        Gives visual movement in the Webots viewport during demo.
+        Drive the UR5e through realistic surgical trajectories.
+
+        Alternates between suturing and incision phases, with continuous
+        breathing compensation overlaid on every motion.
         """
-        self.t += self.timestep / 1000.0
+        dt = self.timestep / 1000.0
+        self.t += dt
 
-        target_positions = [
-            0.5 * math.sin(0.5 * self.t),         # shoulder pan
-            -0.3 + 0.2 * math.sin(0.3 * self.t),  # shoulder lift
-            0.4 * math.sin(0.4 * self.t),          # elbow
-            0.3 * math.sin(0.6 * self.t),          # wrist 1
-            0.2 * math.sin(0.5 * self.t),          # wrist 2
-            0.1 * math.sin(0.7 * self.t)           # wrist 3
-        ]
+        # ── Phase management: cycle between suture ↔ incision ─────────
+        phase_t = self.t - self.phase_start_t
 
-        for motor, pos in zip(self.motors, target_positions):
+        if self.phase == "suture" and phase_t >= SUTURE_PHASE_DURATION:
+            self.phase = "incision"
+            self.phase_start_t = self.t
+            phase_t = 0.0
+            print(f"[TRAJECTORY] t={self.t:.1f}s — switching to INCISION phase")
+        elif self.phase == "incision" and phase_t >= INCISION_PHASE_DURATION:
+            self.phase = "suture"
+            self.phase_start_t = self.t
+            phase_t = 0.0
+            print(f"[TRAJECTORY] t={self.t:.1f}s — switching to SUTURE phase")
+
+        # ── Compute trajectory + breathing overlay ────────────────────
+        if self.phase == "suture":
+            targets = self._suture_targets(phase_t)
+        else:
+            targets = self._incision_targets(phase_t)
+
+        breathing = self._breathing_compensation()
+        final_targets = [t + b for t, b in zip(targets, breathing)]
+
+        for motor, pos in zip(self.motors, final_targets):
             motor.setPosition(pos)
 
     def forward_kinematics(self, joint_angles: List[float]) -> List[float]:
         """
-        Compute end effector position from joint angles using forward kinematics.
+        Compute approximate end-effector position from joint angles.
 
-        TODO: Replace with actual Denavit-Hartenberg (DH) parameters for UR5e.
-        This is a stub implementation that approximates a 6-DOF arm.
+        Uses simplified UR5e geometry (two-link planar approximation
+        with shoulder rotation). Sufficient for demo telemetry;
+        replace with full DH parameters for clinical use.
 
-        For a real implementation:
-        1. Define DH parameters (a, d, alpha, theta) for each joint
-        2. Compute transformation matrices T_i for each link
-        3. Multiply: T_0_6 = T_0_1 * T_1_2 * T_2_3 * T_3_4 * T_4_5 * T_5_6
-        4. Extract position from the last column of T_0_6
-
-        UR5e DH parameters (approximate, replace with exact values):
+        UR5e DH parameters (reference, not fully used here):
         - Link 1: a=0.000, d=0.1625, alpha=pi/2
         - Link 2: a=-0.425, d=0.000, alpha=0
         - Link 3: a=-0.3922, d=0.000, alpha=0
@@ -124,23 +257,69 @@ class SurgicalArmController:
         - Link 5: a=0.000, d=0.0997, alpha=-pi/2
         - Link 6: a=0.000, d=0.0996, alpha=0
         """
-        x = 0.3 * math.cos(joint_angles[0]) * math.cos(joint_angles[1])
-        y = 0.3 * math.sin(joint_angles[0]) * math.cos(joint_angles[1])
-        z = 0.3 * math.sin(joint_angles[1]) + 0.2
+        # Approximate link lengths (metres)
+        L1 = 0.425   # upper arm
+        L2 = 0.392   # forearm
 
-        return [x, y, z]
+        theta1 = joint_angles[0]  # shoulder pan  (rotation about Z)
+        theta2 = joint_angles[1]  # shoulder lift (elevation)
+        theta3 = joint_angles[2]  # elbow
+
+        # Planar reach in the shoulder-lift + elbow plane
+        r = L1 * math.cos(theta2) + L2 * math.cos(theta2 + theta3)
+        z = L1 * math.sin(theta2) + L2 * math.sin(theta2 + theta3) + 0.1625
+
+        # Project into XY via shoulder pan
+        x = r * math.cos(theta1)
+        y = r * math.sin(theta1)
+
+        return [round(x, 6), round(y, 6), round(z, 6)]
+
+    def _estimate_velocities(self, current_angles: List[float]) -> List[float]:
+        """
+        Numerically estimate joint velocities from consecutive angle readings.
+
+        Returns rad/s for each joint. Uses zero on the first call.
+        """
+        if self.prev_joint_angles is None:
+            return [0.0] * 6
+
+        dt = self.timestep / 1000.0
+        if dt <= 0:
+            return [0.0] * 6
+
+        velocities = [
+            (curr - prev) / dt
+            for curr, prev in zip(current_angles, self.prev_joint_angles)
+        ]
+        return [round(v, 5) for v in velocities]
+
+    def _estimate_forces(self, joint_velocities: List[float]) -> List[float]:
+        """
+        Approximate applied torques from velocity (simple damping model).
+
+        In production, read from force/torque sensors. This gives the
+        telemetry realistic non-zero force values for the dashboard.
+        """
+        # Damping coefficient (Nm per rad/s) — tuned for visual plausibility
+        DAMPING = 2.5
+        return [round(abs(v) * DAMPING + random.gauss(0, 0.02), 4) for v in joint_velocities]
 
     def detect_anomalies(
         self,
         joint_velocities: List[float],
         end_effector_xyz: List[float]
-    ) -> tuple[bool, Optional[str]]:
+    ) -> Tuple[bool, Optional[str]]:
         """
-        Run local anomaly detection before sending telemetry.
+        Run local anomaly detection, plus a stochastic 5% random trigger.
+
+        The random trigger ensures the UI alert pipeline is exercised
+        during every demo, regardless of how gentle the trajectory is.
 
         Returns:
             (anomaly_detected: bool, anomaly_reason: str or None)
         """
+        # 1. Physics-based: velocity threshold
         for i, velocity in enumerate(joint_velocities):
             if abs(velocity) > ANOMALY_VELOCITY_THRESHOLD:
                 return True, (
@@ -148,6 +327,7 @@ class SurgicalArmController:
                     f"exceeds threshold {ANOMALY_VELOCITY_THRESHOLD} rad/s"
                 )
 
+        # 2. Physics-based: end-effector position deviation
         if self.previous_end_effector_xyz is not None:
             for i, (current, previous) in enumerate(zip(end_effector_xyz, self.previous_end_effector_xyz)):
                 deviation = abs(current - previous)
@@ -158,21 +338,30 @@ class SurgicalArmController:
                         f"exceeds threshold {ANOMALY_POSITION_THRESHOLD} m"
                     )
 
+        # 3. Stochastic: 5% random anomaly for demo/testing
+        if random.random() < RANDOM_ANOMALY_PROBABILITY:
+            reason = random.choice(RANDOM_ANOMALY_REASONS)
+            return True, reason
+
         return False, None
 
     def collect_telemetry(self) -> Dict:
-        """Collect telemetry data from all sensors."""
+        """Collect telemetry data from all sensors with velocity estimation."""
         joint_angles = [sensor.getValue() for sensor in self.position_sensors]
-        joint_velocities = [0.0] * 6  # placeholder — use velocity sensors in production
+
+        # Estimate velocities numerically from consecutive readings
+        joint_velocities = self._estimate_velocities(joint_angles)
+        self.prev_joint_angles = joint_angles[:]
+
         end_effector_xyz = self.forward_kinematics(joint_angles)
-        applied_forces = [0.0] * 6   # placeholder — use force/torque sensors in production
+        applied_forces = self._estimate_forces(joint_velocities)
 
         anomaly_detected, anomaly_reason = self.detect_anomalies(
             joint_velocities,
             end_effector_xyz
         )
 
-        self.previous_end_effector_xyz = end_effector_xyz.copy()
+        self.previous_end_effector_xyz = end_effector_xyz[:]
 
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -239,17 +428,18 @@ class SurgicalArmController:
             print(f"[ERROR] Failed to write telemetry log: {e}")
 
     def run(self):
-        """Main control loop."""
-        print("[CONTROLLER] Surgical arm controller started — streaming telemetry")
+        """Main control loop — streams telemetry every 500 ms."""
+        print(f"[CONTROLLER] Surgical arm controller started — phase: {self.phase}")
+        print(f"[CONTROLLER] Streaming telemetry every {TELEMETRY_SEND_INTERVAL_MS} ms")
         self.last_telemetry_time = time.time() * 1000
 
         while self.robot.step(self.timestep) != -1:
-            # Drive arm movement every step
+            # Drive arm movement every physics step
             self.move_arm()
 
-            # Stream telemetry at configured interval
+            # Stream telemetry at 500 ms intervals
             current_time = time.time() * 1000
-            if current_time - self.last_telemetry_time >= TELEMETRY_INTERVAL_MS:
+            if current_time - self.last_telemetry_time >= TELEMETRY_SEND_INTERVAL_MS:
                 payload = self.collect_telemetry()
                 self.send_telemetry(payload)
                 self.log_telemetry(payload)

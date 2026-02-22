@@ -67,6 +67,16 @@ export interface TranscribeResult {
     isLive: boolean;
 }
 
+/** Structured clinical insights returned by Google Gemini */
+export interface GeminiInsights {
+    /** Detected surgical procedure name */
+    procedure: string;
+    /** Critical clinical warnings (null if none) */
+    criticalWarnings: string | null;
+    /** Numeric observation value extracted by Gemini */
+    fhirObservationValue: number;
+}
+
 export interface ScribeObservationResult {
     /** The FHIR Observation built from the transcript */
     observation: FhirObservation;
@@ -74,6 +84,8 @@ export interface ScribeObservationResult {
     billing: TraceResult;
     /** The raw transcript that was parsed */
     transcript: string;
+    /** Clinical insights from Google Gemini (undefined if Gemini unavailable) */
+    geminiInsights?: GeminiInsights;
 }
 
 // ─── Vital Sign Extraction ───────────────────────────────────────────────────
@@ -189,7 +201,7 @@ export async function transcribeAudio(audioBlob: Blob): Promise<TranscribeResult
 
     try {
         const formData = new FormData();
-        formData.append('audio', audioBlob, 'recording.webm');
+        formData.append('file', audioBlob, 'recording.webm');
         formData.append('model_id', 'scribe_v1');
 
         const response = await fetch(`${ELEVENLABS_API_BASE}/v1/speech-to-text`, {
@@ -247,7 +259,7 @@ export async function transcribeAudioLive(audioBlob: Blob): Promise<TranscribeRe
 
     try {
         const formData = new FormData();
-        formData.append('audio', audioBlob, 'recording.webm');
+        formData.append('file', audioBlob, 'recording.webm');
         formData.append('model_id', 'scribe_v1');
 
         const response = await fetch(`${ELEVENLABS_API_BASE}/v1/speech-to-text`, {
@@ -276,6 +288,88 @@ export async function transcribeAudioLive(audioBlob: Blob): Promise<TranscribeRe
         const message = err instanceof Error ? err.message : 'Unknown ElevenLabs error';
         log.error('transcribeAudioLive failed', { error: message });
         return transcribeAudioMock();
+    }
+}
+
+// ─── Google Gemini Clinical Analysis ─────────────────────────────────────────
+
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GEMINI_MODEL = 'gemini-1.5-pro';
+
+/** Read the Google Gemini API key from the environment. */
+function getGeminiApiKey(): string | undefined {
+    return import.meta.env.VITE_GOOGLE_GEMINI_KEY as string | undefined;
+}
+
+/**
+ * Sends the transcript to Google Gemini for clinical insight analysis.
+ *
+ * Returns structured insights (procedure, warnings, observation value).
+ * Falls back to `null` if the API key is missing or the request fails —
+ * Gemini analysis is additive and must never block the scribe pipeline.
+ */
+export async function analyzeWithGemini(transcript: string): Promise<GeminiInsights | null> {
+    const apiKey = getGeminiApiKey();
+
+    if (!apiKey) {
+        log.warn('VITE_GOOGLE_GEMINI_KEY not set — skipping Gemini clinical analysis');
+        return null;
+    }
+
+    const prompt = `You are an AI surgical assistant. The surgeon just dictated this note: "${transcript}". Analyze this for clinical insights. Return a raw JSON object with: "procedure" (string), "criticalWarnings" (string or null if none), and "fhirObservationValue" (number). Do not use markdown.`;
+
+    try {
+        const response = await fetch(
+            `${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{ text: prompt }],
+                    }],
+                    generationConfig: {
+                        temperature: 0.2,
+                        maxOutputTokens: 256,
+                    },
+                }),
+            },
+        );
+
+        if (!response.ok) {
+            const errorBody = await response.text().catch(() => 'Unable to read response');
+            log.error('Gemini API returned non-OK status', {
+                status: response.status,
+                body: errorBody,
+            });
+            return null;
+        }
+
+        const data = await response.json();
+        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+
+        // Strip any accidental markdown fences Gemini may add
+        const cleaned = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+        const parsed = JSON.parse(cleaned) as GeminiInsights;
+
+        // Validate shape
+        if (typeof parsed.procedure !== 'string' || typeof parsed.fhirObservationValue !== 'number') {
+            log.warn('Gemini returned unexpected JSON shape', { raw: cleaned });
+            return null;
+        }
+
+        log.info('Gemini clinical analysis complete', {
+            procedure: parsed.procedure,
+            hasWarnings: parsed.criticalWarnings !== null,
+            fhirValue: parsed.fhirObservationValue,
+        });
+
+        return parsed;
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown Gemini error';
+        log.error('analyzeWithGemini failed', { error: message });
+        return null;
     }
 }
 
@@ -381,6 +475,28 @@ export async function processScribeObservation(
     // Step 2: Parse → FHIR
     const observation = transcriptToFhirObservation(transcription.transcript, patientRef);
 
+    // Step 2b: Gemini clinical analysis (additive — never blocks pipeline)
+    const geminiInsights = await analyzeWithGemini(transcription.transcript);
+
+    // If Gemini returned a numeric observation value, overlay it on the FHIR resource
+    if (geminiInsights) {
+        if (typeof geminiInsights.fhirObservationValue === 'number' && !observation.valueQuantity) {
+            observation.valueQuantity = {
+                value: geminiInsights.fhirObservationValue,
+                unit: observation.valueQuantity?.unit ?? 'unit',
+                system: 'http://unitsofmeasure.org',
+                code: observation.valueQuantity?.code ?? 'unit',
+            };
+        }
+        // Append Gemini procedure to the note for auditability
+        if (geminiInsights.procedure) {
+            observation.note = [
+                ...(observation.note ?? []),
+                { text: `[Gemini] Procedure: ${geminiInsights.procedure}` },
+            ];
+        }
+    }
+
     // Step 3: Bill via Paid.ai ($125.00, autonomous_scribe_observation)
     const billing = await traceObservationWorkflow({
         workflowId: SCRIBE_WORKFLOW_ID,
@@ -392,6 +508,7 @@ export async function processScribeObservation(
             confidence: transcription.confidence.toFixed(3),
             durationSec: transcription.durationSec.toFixed(1),
             isLive: String(transcription.isLive),
+            geminiProcedure: geminiInsights?.procedure ?? 'unavailable',
         },
     });
 
@@ -399,7 +516,97 @@ export async function processScribeObservation(
         observation,
         billing,
         transcript: transcription.transcript,
+        geminiInsights: geminiInsights ?? undefined,
     };
+}
+
+// ─── Text-to-Speech (TTS) — Bi-directional Voice Agent ──────────────────────
+
+/** Default ElevenLabs voice ID (Rachel — clear, professional tone) */
+const DEFAULT_TTS_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
+
+/**
+ * Speaks a warning alert aloud via ElevenLabs Text-to-Speech.
+ *
+ * Sends the message to the ElevenLabs TTS API, receives an audio blob,
+ * and immediately plays it through the browser's audio subsystem.
+ *
+ * Falls back silently if:
+ *   - `VITE_ELEVENLABS_API_KEY` is not set
+ *   - The API request fails
+ *   - Browser autoplay policy blocks playback
+ *
+ * @param message — The warning text to speak aloud
+ * @param voiceId — ElevenLabs voice ID (default: Rachel)
+ */
+export async function speakWarningAlert(
+    message: string,
+    voiceId: string = DEFAULT_TTS_VOICE_ID,
+): Promise<void> {
+    const apiKey = getElevenLabsApiKey();
+
+    if (!apiKey) {
+        log.warn('VITE_ELEVENLABS_API_KEY not set — skipping TTS warning alert');
+        return;
+    }
+
+    try {
+        const response = await fetch(
+            `${ELEVENLABS_API_BASE}/v1/text-to-speech/${voiceId}`,
+            {
+                method: 'POST',
+                headers: {
+                    'xi-api-key': apiKey,
+                    'Content-Type': 'application/json',
+                    Accept: 'audio/mpeg',
+                },
+                body: JSON.stringify({
+                    text: message,
+                    model_id: 'eleven_turbo_v2_5',
+                    voice_settings: {
+                        stability: 0.75,
+                        similarity_boost: 0.85,
+                        style: 0.1,
+                        use_speaker_boost: true,
+                    },
+                }),
+            },
+        );
+
+        if (!response.ok) {
+            const errorBody = await response.text().catch(() => 'Unable to read response');
+            log.error('ElevenLabs TTS returned non-OK status', {
+                status: response.status,
+                body: errorBody,
+            });
+            return;
+        }
+
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        try {
+            const audio = new Audio(audioUrl);
+            audio.addEventListener('ended', () => URL.revokeObjectURL(audioUrl));
+            audio.addEventListener('error', () => URL.revokeObjectURL(audioUrl));
+            await audio.play();
+            log.info('TTS warning alert played successfully', {
+                messageLength: message.length,
+                voiceId,
+            });
+        } catch (playbackErr) {
+            // Browser autoplay policy may block audio without user gesture
+            URL.revokeObjectURL(audioUrl);
+            const reason = playbackErr instanceof Error ? playbackErr.message : 'Unknown playback error';
+            log.warn('Browser blocked TTS audio playback (autoplay policy)', {
+                error: reason,
+                voiceId,
+            });
+        }
+    } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown ElevenLabs TTS error';
+        log.error('speakWarningAlert failed', { error: errMsg });
+    }
 }
 
 // ─── Logger ──────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import { validateFhirResource } from '../utils/fhirValidation';
 import { createFhirMeta, generateFhirId, formatFhirDateTime } from '../utils/fhirValidation';
 import { isMockOnly, isLiveMode } from '../lib/data-mode';
 import { crossReferenceAnomaly } from '../api/hai-def';
+import { speakWarningAlert } from '../api/voice-scribe';
 import { supabase } from '@/integrations/supabase/client';
 import { logger } from '../utils/logger';
 import { metrics } from '../utils/metrics';
@@ -221,6 +222,11 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
             };
             setAlerts((prev) => [alert, ...prev].slice(0, maxAlerts));
 
+            // Fire-and-forget TTS warning — must never block telemetry
+            speakWarningAlert(
+              'Critical Anomaly Detected. Pausing robotic procedures and cross-referencing global data.',
+            ).catch(() => { /* swallow — TTS must not crash vitals */ });
+
             // Fire-and-forget HAI-DEF cross-reference
             crossReferenceAnomaly(alert)
               .then((insights) => {
@@ -278,6 +284,52 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
               })
               .catch(() => { /* swallow — HAI-DEF must not crash vitals */ });
           }
+
+          // ── Auto-bill for each vital-sign observation tick (live mode) ─
+          const primary = updated[0];
+          if (primary) {
+            const obs: FhirObservation = {
+              resourceType: 'Observation',
+              id: generateFhirId(),
+              meta: createFhirMeta(),
+              status: 'final',
+              category: [{
+                coding: [{
+                  system: 'http://terminology.hl7.org/CodeSystem/observation-category',
+                  code: 'vital-signs',
+                  display: 'Vital Signs',
+                }],
+              }],
+              code: {
+                coding: [{
+                  system: 'http://loinc.org',
+                  code: primary.code,
+                  display: primary.display,
+                }],
+                text: primary.display,
+              },
+              subject: { reference: 'Patient/patient-001' },
+              effectiveDateTime: formatFhirDateTime(),
+              valueQuantity: {
+                value: primary.value,
+                unit: primary.unit,
+                system: 'http://unitsofmeasure.org',
+                code: primary.unit,
+              },
+            };
+
+            // Fire-and-forget — billing must never block vital-sign rendering
+            traceObservationWorkflow({
+              workflowId: 'continuous_vitals_monitoring',
+              observation: obs,
+              billedAmount: DEFAULT_VITAL_BILLED,
+              costs: DEFAULT_VITAL_COSTS,
+              metadata: { deviceId, vitalCode: primary.code },
+            }).catch(() => {
+              // swallow — billing failures must not crash telemetry
+            });
+          }
+
           return updated;
         });
       }, vitalIntervalMs);
@@ -383,6 +435,11 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
 
         if (frame.isAnomalous) {
           metrics.increment('kinematic.anomaly_detected', { deviceId });
+
+          // Fire-and-forget TTS warning — must never block telemetry
+          speakWarningAlert(
+            'Critical Anomaly Detected. Pausing robotic procedures and cross-referencing global data.',
+          ).catch(() => { /* swallow — TTS must not crash vitals */ });
         }
       }, kinematicIntervalMs);
     }, 500);

@@ -29,6 +29,7 @@ import {
   processScribeObservation,
   SCRIBE_BILLED_AMOUNT,
   type ScribeObservationResult,
+  type GeminiInsights,
 } from '@/api/voice-scribe';
 import { cn } from '@/lib/utils';
 
@@ -163,6 +164,15 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
           description: `"${result.transcript.slice(0, 80)}…" — Vital: ${vitalDisplay} — Billed: $${SCRIBE_BILLED_AMOUNT.toFixed(2)} via Paid.ai`,
         });
 
+        // If Gemini flagged critical warnings, alert the surgeon immediately
+        if (result.geminiInsights?.criticalWarnings) {
+          toast({
+            title: '⚠️ Gemini Clinical Warning',
+            description: result.geminiInsights.criticalWarnings,
+            variant: 'destructive',
+          });
+        }
+
         // Notify parent so ClinicalDashboard can surface the observation
         onObservationCreated?.(result);
       } catch (err) {
@@ -251,6 +261,28 @@ export function VoiceScribeWidget({ onObservationCreated }: VoiceScribeWidgetPro
             <p className="text-[10px] text-muted-foreground/60">
               Trace: {lastResult.billing.trace.traceId} · {lastResult.billing.trace.outcome}
             </p>
+
+            {/* ── Gemini Clinical Insights ──────────────────────── */}
+            {lastResult.geminiInsights && (
+              <div className="mt-2 space-y-1 border-t border-border pt-2" data-testid="scribe-gemini-insights">
+                <p className="font-medium text-primary">
+                  🧠 Gemini Insights
+                </p>
+                <p className="text-muted-foreground">
+                  <span className="font-medium">Procedure:</span>{' '}
+                  {lastResult.geminiInsights.procedure}
+                </p>
+                {lastResult.geminiInsights.criticalWarnings && (
+                  <p className="font-medium text-destructive" data-testid="scribe-gemini-warning">
+                    ⚠️ {lastResult.geminiInsights.criticalWarnings}
+                  </p>
+                )}
+                <p className="text-muted-foreground">
+                  <span className="font-medium">Observation Value:</span>{' '}
+                  {lastResult.geminiInsights.fhirObservationValue}
+                </p>
+              </div>
+            )}
           </div>
         )}
       </CardContent>
