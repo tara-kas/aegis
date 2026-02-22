@@ -4,6 +4,7 @@ import type { PaidAiTrace, CostBreakdown } from '../types/financial';
 import type { FhirObservation } from '../api/fhir';
 import { mockVitalSigns, mockAnomalyAlerts, tickVitalSigns, maybeGenerateAlert, generateKinematicFrame } from '../mock/data';
 import { traceObservationWorkflow, onTraceRecorded, getTraceStore } from '../api/telemetry-billing';
+import { evaluateFrame, onSafetyAlert } from '../api/reliability-agents';
 import { validateFhirResource } from '../utils/fhirValidation';
 import { createFhirMeta, generateFhirId, formatFhirDateTime } from '../utils/fhirValidation';
 import { logger } from '../utils/logger';
@@ -60,6 +61,7 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
   const frameCounter = useRef(0);
   const vitalTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const kinematicTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const prevFrameTimestamp = useRef<string | null>(null);
 
   // ── Subscribe to billing trace events ────────────────────────────────────
   useEffect(() => {
@@ -68,6 +70,14 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
     });
     return unsubscribe;
   }, []);
+
+  // ── Subscribe to Incident Commander safety alerts ────────────────────────
+  useEffect(() => {
+    const unsubscribe = onSafetyAlert((alert) => {
+      setAlerts((prev) => [alert, ...prev].slice(0, maxAlerts));
+    });
+    return unsubscribe;
+  }, [maxAlerts]);
 
   // ── Manual billing trigger ───────────────────────────────────────────────
   const recordObservationBilling = useCallback(async (
@@ -174,7 +184,7 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
 
             // Fire-and-forget — billing must never block vital-sign rendering
             traceObservationWorkflow({
-              workflowId: 'surgical-obs',
+              workflowId: 'continuous_vitals_monitoring',
               observation: obs,
               billedAmount: DEFAULT_VITAL_BILLED,
               costs: DEFAULT_VITAL_COSTS,
@@ -191,6 +201,19 @@ export function useTelemetry(options: UseTelemetryOptions): UseTelemetryReturn {
       kinematicTimerRef.current = setInterval(() => {
         const frame = generateKinematicFrame(frameCounter.current++);
         setLatestFrame(frame);
+
+        // ── Incident Commander evaluation ──────────────────────────────
+        const cmdResult = evaluateFrame(frame, prevFrameTimestamp.current);
+        prevFrameTimestamp.current = frame.timestamp;
+
+        if (cmdResult.triggered) {
+          metrics.increment('incident_commander.triggered', { deviceId, reason: cmdResult.reason });
+          log.warn('Incident Commander triggered', {
+            frameId: frame.frameId,
+            reason: cmdResult.reason,
+          });
+        }
+
         if (frame.isAnomalous) {
           metrics.increment('kinematic.anomaly_detected', { deviceId });
         }

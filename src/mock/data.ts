@@ -308,8 +308,16 @@ function makeJoints(frameId: number): JointAngle[] {
 
 export function generateKinematicFrame(frameId: number): KinematicFrame {
   const anomalyScore = frameId === 150 ? 0.87 : Math.random() * 0.15;
+
+  // ── Failsafe simulation: inject a 500 ms latency spike at frame 75 ─────
+  // The Incident Commander uses consecutive-frame timestamps to detect
+  // latency breaches.  By pushing frame 75's timestamp 500 ms into the
+  // future relative to its natural cadence, we guarantee a latency > 200 ms
+  // that the commander MUST intercept.
+  const latencyInjectionMs = frameId === 75 ? 500 : 0;
+
   return {
-    timestamp: new Date(Date.now() + frameId * 100).toISOString(),
+    timestamp: new Date(Date.now() + frameId * 100 + latencyInjectionMs).toISOString(),
     frameId,
     deviceId: 'robot-arm-001',
     joints: makeJoints(frameId),
@@ -552,12 +560,12 @@ let _vitalTickCounter = 0;
  *  - Core temperature: ±0.01–0.02 °C (thermal inertia — changes over 10–15 min)
  */
 const DRIFT_CONFIG: Record<string, { maxDrift: number; trendThreshold: number; meanReversion: number }> = {
-  '8867-4': { maxDrift: 1.5,  trendThreshold: 1.0,  meanReversion: 0.02 },  // Heart rate
-  '2708-6': { maxDrift: 0.25, trendThreshold: 0.3,  meanReversion: 0.05 },  // SpO₂
-  '8480-6': { maxDrift: 1.5,  trendThreshold: 1.5,  meanReversion: 0.02 },  // Systolic BP
-  '8462-4': { maxDrift: 1.0,  trendThreshold: 1.0,  meanReversion: 0.02 },  // Diastolic BP
-  '19889-5': { maxDrift: 0.4, trendThreshold: 0.5,  meanReversion: 0.03 },  // EtCO₂
-  '9279-1': { maxDrift: 0.25, trendThreshold: 0.3,  meanReversion: 0.04 },  // Resp rate
+  '8867-4': { maxDrift: 1.5, trendThreshold: 1.0, meanReversion: 0.02 },  // Heart rate
+  '2708-6': { maxDrift: 0.25, trendThreshold: 0.3, meanReversion: 0.05 },  // SpO₂
+  '8480-6': { maxDrift: 1.5, trendThreshold: 1.5, meanReversion: 0.02 },  // Systolic BP
+  '8462-4': { maxDrift: 1.0, trendThreshold: 1.0, meanReversion: 0.02 },  // Diastolic BP
+  '19889-5': { maxDrift: 0.4, trendThreshold: 0.5, meanReversion: 0.03 },  // EtCO₂
+  '9279-1': { maxDrift: 0.25, trendThreshold: 0.3, meanReversion: 0.04 },  // Resp rate
   '8310-5': { maxDrift: 0.015, trendThreshold: 0.05, meanReversion: 0.01 }, // Temperature
 };
 const DEFAULT_DRIFT = { maxDrift: 0.5, trendThreshold: 0.5, meanReversion: 0.02 };

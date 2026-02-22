@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { mockComplianceItems, mockIncidents, mockAuditEntries } from '../mock/data';
 import { EUAIActChecklist } from './compliance/EUAIActChecklist';
 import { IncidentAlertLog } from './compliance/IncidentAlertLog';
@@ -6,6 +6,7 @@ import { ComplianceScoreCard } from './compliance/ComplianceScoreCard';
 import { AuditTrail } from './compliance/AuditTrail';
 import { ShieldCheck } from 'lucide-react';
 import type { ComplianceScore, Incident } from '../types/compliance';
+import { onIncidentCreated } from '../api/reliability-agents';
 import { logger } from '../utils/logger';
 
 function computeScores(): ComplianceScore[] {
@@ -29,6 +30,14 @@ function computeScores(): ComplianceScore[] {
 export function CompliancePanel() {
   const [incidents, setIncidents] = useState<Incident[]>(mockIncidents);
   const scores = computeScores();
+
+  // Subscribe to Incident Commander events in real time
+  useEffect(() => {
+    const unsubscribe = onIncidentCreated((incident) => {
+      setIncidents((prev) => [incident, ...prev]);
+    });
+    return unsubscribe;
+  }, []);
 
   const handleEscalate = useCallback((incidentId: string) => {
     logger.info('Incident escalated', { incidentId });
